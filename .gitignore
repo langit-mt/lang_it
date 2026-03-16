@@ -15,6 +15,10 @@ wrappers/ruby/pairs/*
 wrappers/ruby/lang_it_rb.o
 wrappers/ruby/lang_it_rb.so
 pairs/*.o
+src/pairs
+lang_it.cpp
+src/*.json
+src/*.lang
 src/lang_it.h.gch
 src/json.hpp
 src/json.hpp
