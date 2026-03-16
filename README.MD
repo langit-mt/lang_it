@@ -6,11 +6,17 @@ lang_it is a rule-based, portable and lightweight universal translation engine w
 
 - Multi word entries
 - Verb conjugation
-- Inflexion (Gender, number, case, etc)
+- Morphology (Gender, number, case, diminutive, etc)
 - Homonym disambiguation
-- Auto-correct
+- Simple auto-correct
 - Multi-script languages (Latin, Hanzi, Kanji and Kana, Arabic-based, Cyrilic, Hangul)
-- Validated JS (WASM), Ruby (Rice) and Java (JNI) bindings. 
+
+## Technical Info
+
+- ~59kb compiled footprint.
+- C++ STL only, no external dependencies, runs anywhere as long as there's std::vector and std::string support.
+- Can be compiled with g++, Clang or MSVC.
+- Validated JS (WASM), Ruby (Rice), Python (pybind11) and Java (JNI) bindings. 
 
 ## Why?
 

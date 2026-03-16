@@ -67,32 +67,33 @@ enum AFFIX_TYPE {
     MIDDLE_WORD = 7,
     NONE = 8
 };
-
-    
 #define LOOKUP(DICTIONARY, TYPE, WORD, GENDER_FROM, GENDER_TO, PLURAL_FROM, PLURAL_TO)          \
 {                                                                       \
     GenderResult g = detect_gender(WORD, GENDER_FROM);                  \
     MorphResult p = detect_plural(WORD, PLURAL_FROM); \
             /*DEFAULT */         \
     if (const char* result = lookup(DICTIONARY, WORD.c_str())) {                \
-        return { WORD, normalize(result), TYPE };                       \
+        uint16_t flags = lookupFlags(DICTIONARY, WORD.c_str()); \
+        return { WORD, normalize(result), TYPE, 0, flags };                       \
     }                             \
                  /*GENDER BUT SINGULAR */                               \
     if (const char* result = lookup(DICTIONARY, g.root.c_str())) {      \
+        uint16_t flags = lookupFlags(DICTIONARY, g.root.c_str()); \
         std::string translation = result;                                \
         translation = apply_gender(translation, g.matched_variation, GENDER_TO); \
-        return { WORD, normalize(translation), TYPE };                   \
+        return { WORD, normalize(translation), TYPE, 0, flags };                   \
     }                                                                   \
-        /*PLURAL BUT NO GENDER */  \
+        /* ALL KINDS OF MORPHS LOL*/  \
     if (const char* result = lookup(DICTIONARY, p.root.c_str())) {      \
+        uint16_t flags = lookupFlags(DICTIONARY, p.root.c_str()); \
         std::string translation = result;                                \
-         uint8_t f = lookupFlags(nouns, p.root.c_str());\
-        translation = apply_morph(translation, p.matched_variation, PLURAL_TO, f); \
-        return { WORD, normalize(translation), TYPE };                   \
+        translation = apply_morph(translation, p.matched_variation, PLURAL_TO, flags); \
+        return { WORD, normalize(translation), TYPE, 0, flags };                   \
     }  \
     if(WORD.length() > 3){\
        if (auto_correct(DICTIONARY, WORD)) {                \
-        return { WORD, normalize(auto_correct(DICTIONARY, WORD)), TYPE };                       \
+        uint16_t flags = lookupFlags(DICTIONARY, auto_correct(DICTIONARY, WORD)); \
+        return { WORD, normalize(auto_correct(DICTIONARY, WORD)), TYPE, 0, flags };                       \
     }\
 }\
 }
@@ -123,12 +124,19 @@ typedef struct  {
 
 } GenitiveConstruction;
 
+enum AdjectiveOrder {
+   ADJECTIVE_FIRST = 0,
+   NOUN_FIRST = 1
+};
+
 typedef struct {
    int clause_order_from;
    int clause_order_to;
    
    GenitiveConstruction gc_from[10]; 
    GenitiveConstruction gc_to[10];   
+   AdjectiveOrder ao_from;
+   AdjectiveOrder ao_to;
    int gc_from_count;                
    int gc_to_count;  
    
@@ -200,7 +208,7 @@ inline std::string remove_ending_multibyte(const std::string& str, const std::st
     
     return str.substr(0, bytes_to_keep);
 }
-#define VERB_LOOKUP(DICTIONARY, WORD, ENDINGS, CONJUGATIONS, MULTIBYTE)    \
+#define VERB_LOOKUP(DICTIONARY, WORD, ENDINGS, CONJUGATIONS, MORPH_FROM, MORPH_TO, MULTIBYTE)    \
 {                                                                           \
     if (MULTIBYTE) {                                                        \
         /* Multibyte-aware version */                                      \
@@ -322,7 +330,7 @@ inline std::string remove_ending_multibyte(const std::string& str, const std::st
             const char* adjResult = lookup(ADJECTIVES, stem.c_str());\
             if (adjResult) {\
                 translation = std::string(adjResult) + mapped;\
-            word_type = 1;\
+            word_type = suffResult.type;\
             }\
             else if (!stem.empty()) {\
                 std::string altStem = stem.substr(0, stem.length() - 1) + "o";\
@@ -513,7 +521,9 @@ enum Morphology {
    DIMINUTIVE_MORPH = 1,
    AUGMENTATIVE_MORPH = 2,
    COMPARATIVE_MORPH = 3,
-   SUPERLATIVE_MORPH = 4
+   SUPERLATIVE_MORPH = 4,
+   DEFINITE_MORPH = 5,
+   AGENT_MORPH = 6
 
 };
 
@@ -689,7 +699,6 @@ inline std::string apply_morph(
     int source_morph = from_var->morphology; 
 
     for (const auto& var : morph_to->variations) {
-        // Matchmorphology type (PLURAL_MORPH, DIMINUTIVE_MORPH, etc.)
         if (var.morphology == source_morph) { 
             
             // Check flags if needed
@@ -697,6 +706,8 @@ inline std::string apply_morph(
                 const std::string& ending = var.ending;
                 const std::string& form   = var.form;
                 
+                switch(source_morph){
+                case SUFFIX:
                   if (translation.size() >= ending.size() &&
                     translation.compare(translation.size() - ending.size(), ending.size(), ending) == 0) 
                 {
@@ -726,7 +737,13 @@ inline std::string apply_morph(
                                 
                             // etc.
                         }}
+                break;
+                case PREV_WORD:
+                if (translation.size() >= ending.size() &&
+                    translation.compare(translation.size() - ending.size(), ending.size(), ending) == 0)
+                break;
             }
+        }
         }
     }
 
@@ -969,23 +986,22 @@ std::string name(const char* sentence) { \
 
 
 #define DEFAULT()\
-  if (sentence_arr.at(i).type != -1){\
-             reordered_arr.push_back(Word{ sentence_arr.at(i).word, normalize(sentence_arr.at(i).translation), sentence_arr.at(i).type});\
-   }
-#define HANDLE_CASE(INFO_ARG, FROM_CASE, TO_CASE) \
+             reordered_arr.push_back(Word{ sentence_arr.at(i).word, normalize(sentence_arr.at(i).translation), sentence_arr.at(i).type,    sentence_arr.at(i).orig_flags, sentence_arr.at(i).flags});\
+
+            #define HANDLE_CASE(INFO_ARG, FROM_CASE, TO_CASE) \
     if (!reordered_arr.empty()) { \
         for (size_t i = 0; i + 1 < reordered_arr.size(); ++i) { \
             auto &current = reordered_arr.at(i); \
             auto &next = reordered_arr.at(i + 1); \
             Word current_translation_temp = reordered_arr.at(i); \
             Word next_translation_temp = reordered_arr.at(i + 1); \
-            if (current.type == 3 && (next.type == 0 || next.type == 4)) { \
+            if (current.type == 3 && (next.type == 0 || next.type == 4 || next.type == -1)) { \
                 uint8_t f = lookupFlags(nouns, next.word.c_str()); \
                 CaseResult g = detect_case(current.word, FROM_CASE); \
                 if ((INFO_ARG)->clause_order_to == SVO) { \
                     next.translation = apply_case(next.translation, g.matched_variation, TO_CASE, f); \
                 } else if ((INFO_ARG)->clause_order_to == SOV) { \
-                    current = Word{next.word,apply_case(next.translation, g.matched_variation, TO_CASE, f), next.type}; \
+                    current = Word{next.word,apply_case(next.translation, g.matched_variation, TO_CASE, f), next.type, next.orig_flags, next.flags}; \
                     next = current_translation_temp; \
                 } \
             } \
@@ -993,6 +1009,19 @@ std::string name(const char* sentence) { \
     }
 #define HANDLE_POSSESSION(INFO_ARG, ARR) \
     do { \
+                if ((ARR).size() >= 2) { \
+                    std::vector<Word> replacement; \
+                    AdjectiveOrder ao_from = (INFO_ARG)->ao_from; \
+                    AdjectiveOrder ao_to = (INFO_ARG)->ao_to; \
+                      for (size_t i = 0; i + 1 < (ARR).size(); ++i) { \
+                        if(ao_from != ao_to && (((ARR)[i].type == NOUN &&  (ARR)[i + 1].type == ADJECTIVE) || ((ARR)[i].type == NOUN &&  (ARR)[i + 1].type == ADJECTIVE))){\
+                          Word temp_word_i = (ARR)[i];\
+                          Word temp_word_i_ = (ARR)[i + 1];\
+                          (ARR)[i] = temp_word_i_;\
+                          (ARR)[i + 1] = temp_word_i;\
+                        }\
+                      }\
+                }\
         if ((ARR).size() >= 3) { \
             for (int p_i = 0; p_i < (INFO_ARG)->gc_from_count; ++p_i) { \
                 GenitiveConstruction gc_from = (INFO_ARG)->gc_from[p_i]; \
@@ -1019,13 +1048,13 @@ std::string name(const char* sentence) { \
                     /* Build replacement words according to target order */ \
                     std::vector<Word> replacement; \
                     if (gc_to.order == POSSESSED_FIRST) { \
-                        replacement.push_back(Word{A.word, A.translation, A.type}); \
-                        replacement.push_back(Word{gc_to.addition, gc_to.addition, 5}); /* particle type */ \
-                        replacement.push_back(Word{B.word, B.translation, B.type}); \
+                        replacement.push_back(Word{A.word, A.translation, A.type, A.orig_flags, A.flags}); \
+                        replacement.push_back(Word{gc_to.addition, gc_to.addition, 5, 0, 0}); /* particle type */ \
+                        replacement.push_back(Word{B.word, B.translation, B.type, B.orig_flags, B.flags}); \
                     } else { /* OWNER_FIRST */ \
-                        replacement.push_back(Word{B.word, B.translation, B.type}); \
-                        replacement.push_back(Word{gc_to.addition, gc_to.addition, 5}); \
-                        replacement.push_back(Word{A.word, A.translation, A.type}); \
+                        replacement.push_back(Word{B.word, B.translation, B.type, B.orig_flags, B.flags}); \
+                        replacement.push_back(Word{gc_to.addition, gc_to.addition, 5, 0, 0}); \
+                        replacement.push_back(Word{A.word, A.translation, A.type, A.orig_flags, A.flags}); \
                     } \
                     \
                     /* Replace the three old words with the new ones */ \
@@ -1115,10 +1144,6 @@ enum VerbBases {
     MASCULINE     = 0x0001,
     FEMININE_V      = 0x0002,
     NEUTER        = 0x0003,
-    // 0x0000 means "no gender specified"
-
-    FREE_BIT_1 = 0x0060,  // Available for any language to use
-    FREE_BIT_2 = 0x0070,  // Available for any language to use
 };
 
 #define COMBINE(tense, mood, aspect, person, number, gender, voice) \
@@ -1170,7 +1195,9 @@ enum Flags: uint16_t {
     CONJUNCTIVE = 1 << 8, // and
     CONTRASTIVE = 1 << 9, // but
     DISJUNCTIVE = 1 << 10, // or,
-    INDEFINITE = 1 << 11
+    INDEFINITE = 1 << 11,
+    FREE_BIT_1 = 1 << 12,
+    FREE_BIT_2 = 1 << 13
 };
 
 enum GrammaticalCase : uint8_t {
@@ -1211,6 +1238,8 @@ typedef struct {
    std::string word;
    std::string translation;
    int type;
+   uint16_t orig_flags; // flags for original word, just remembered that in languages that have same linguistic features but with variation (e.g gender in portuguese and russian) we need to know the flags for both the original word and the translation to make decisions.
+   uint16_t flags;
 } Word;
 
 struct Outcome {
@@ -1279,12 +1308,42 @@ std::vector<Word> MEDIATE_HOMONYMS(
 }
 
 
+template <size_t N>
+inline uint16_t lookupFlags(const Entry (&dict)[N], const char* word) {
+    for (size_t i = 0; i < N; ++i) {
+        if (strcmp(dict[i].w, word) == 0) {
+            return dict[i].flags;
+        }
+    }
+    return 0;
+}
+
+enum FlagTarget {
+    CHECK_FIRST_WORD,
+    CHECK_SECOND_WORD,
+    CHECK_BOTH_WORDS,
+    CHECK_EITHER_WORD
+};
+
+struct ParticleRule {
+    int type_before;
+    int type_after;
+    const char* particle;
+    bool sentence_size;
+     uint16_t required_flag;
+    FlagTarget flag_target;
+    const char* particle_translation;  
+    int particle_type;                
+};
+
 inline std::vector<Word> INSERT_PARTICLE(
     std::vector<Word> arr,
     int type_before,
     int type_after,
     const char* particle_word,
     bool sentence_size,
+    uint16_t required_flag,
+    FlagTarget flag_target, 
     const char* particle_translation = nullptr,
     int particle_type = -1
 ) {
@@ -1295,14 +1354,36 @@ inline std::vector<Word> INSERT_PARTICLE(
             arr[i].type == type_before && 
             arr[i + 1].type == type_after && sentence_size) {
             
-            result.push_back(arr[i]); 
-            result.push_back(Word{
-                particle_word, 
-                particle_translation ? particle_translation : particle_word, 
-                particle_type
-            }); 
-            result.push_back(arr[i + 1]); 
-            i++; 
+            // Check based on target
+            bool flag_matches = false;
+            switch (flag_target) {
+                case CHECK_FIRST_WORD:
+                    flag_matches = ((arr[i].flags & required_flag) == required_flag);
+                    break;
+                case CHECK_SECOND_WORD:
+                    flag_matches = ((arr[i + 1].flags & required_flag) == required_flag);
+                    break;
+                case CHECK_BOTH_WORDS:
+                    flag_matches = ((arr[i].flags & required_flag) == required_flag) &&
+                                   ((arr[i + 1].flags & required_flag) == required_flag);
+                    break;
+                case CHECK_EITHER_WORD:
+                    flag_matches = ((arr[i].flags & required_flag) == required_flag) ||
+                                   ((arr[i + 1].flags & required_flag) == required_flag);
+                    break;
+            }
+            if (flag_matches) {
+                result.push_back(arr[i]); 
+                result.push_back(Word{
+                    particle_word, 
+                    particle_translation ? particle_translation : particle_word, 
+                    particle_type
+                }); 
+                result.push_back(arr[i + 1]); 
+                i++; 
+            } else {
+                result.push_back(arr[i]);
+            }
         } else {
             result.push_back(arr[i]);
         }
@@ -1311,24 +1392,28 @@ inline std::vector<Word> INSERT_PARTICLE(
     return result;
 }
 
-struct ParticleRule {
-    int type_before;
-    int type_after;
-    const char* particle;
-    bool sentence_size;
-};
-
 inline std::vector<Word> INSERT_PARTICLES(
     std::vector<Word> arr, 
     const std::vector<ParticleRule>& rules
 ) {
+    
     for (const auto& rule : rules) {
-        arr = INSERT_PARTICLE(arr, rule.type_before, rule.type_after, rule.particle, rule.sentence_size);
+               
+        arr = INSERT_PARTICLE(
+            arr, 
+            rule.type_before, 
+            rule.type_after, 
+            rule.particle, 
+            rule.sentence_size,
+            rule.required_flag,
+            rule.flag_target,
+            rule.particle_translation, 
+            rule.particle_type       
+        );
     }
+    
     return arr;
 }
-
-
 
 
 inline std::vector<Word> POST_CONJUGATION(
@@ -1470,16 +1555,6 @@ inline Verb find_verb_in_array(const Verb dict[], size_t count, const char* word
 
 
 template <size_t N>
-inline uint8_t lookupFlags(const Entry (&dict)[N], const char* word) {
-    for (size_t i = 0; i < N; ++i) {
-        const char* p = dict[i].w;
-        const char* q = word;
-        while (*p && *q && *p == *q) { ++p; ++q; }
-        if (*p == *q) return dict[i].flags;
-    }
-    return 0;
-}
-template <size_t N>
 inline uint8_t lookupVerbFlags(const Verb (&dict)[N], const char* word) {
     for (size_t i = 0; i < N; ++i) {
         const char* p = dict[i].root;
@@ -1522,6 +1597,7 @@ inline uint8_t lookupSuffFlags(const Suffix (&dict)[N], const char* word) {
 
 //invert a pair (casa azul -> azul casa)
 inline void invert(std::vector<Word>& output, const Word& first, const Word& second, const char*) {
+    
     if (!output.empty()) output.pop_back(); 
     output.push_back(first);
     output.push_back(second);
@@ -1588,21 +1664,26 @@ inline std::string unigramLookup(const std::vector<std::string>& array_of_words,
   std::string sentence;
   for(size_t i = 0; i < array_of_words.size(); ++i){
     
-    Word match = nounLookup(array_of_words[i]);
-    
+Word match = nounLookup(array_of_words[i]);
     switch (ignore_flags[i])
     {
     case 0:{
     match_type = match.type;
     if(match.type == -1) match_type = 0;
-    
-         Word match_ = {array_of_words[i], match.translation, match_type};
-        sentence_arr.push_back({match.word, match.translation ,match_type});
+     std::string token = array_of_words[i];
+    bool isPunct = (token.size() == 1 && (token[0] == '.' || token[0] == '!' || 
+                    token[0] == '?' || token[0] == ',' || token[0] == ':' ||
+                    token[0] == ';' || token[0] == '(' || token[0] == ')'));
+    if (isPunct) {
+        match_type = -1;
+    }
+         Word match_ = {array_of_words[i], match.translation, match_type, match.orig_flags, match.flags};
+        sentence_arr.push_back({match.word, match.translation ,match_type, match.orig_flags, match.flags});
         word_arr.push_back(match_);
         break;}
     case 1:{
-        Word match_ = {array_of_words[i], array_of_words[i], 0};
-       sentence_arr.push_back({array_of_words[i], array_of_words[i],0});
+        Word match_ = {array_of_words[i], array_of_words[i], -1, 0,0};
+       sentence_arr.push_back({array_of_words[i], array_of_words[i],-1, 0,0});
          word_arr.push_back(match_);
        break;}
     default:
@@ -1610,7 +1691,9 @@ inline std::string unigramLookup(const std::vector<std::string>& array_of_words,
     }
   }
   if(word_arr.size() > 0) sentence_arr = reorder_helpers(word_arr);
-
+if(word_arr.size() > 0) {
+    sentence_arr = reorder_helpers(word_arr);
+}
   
  for (size_t i = 0; i < sentence_arr.size(); ++i) {
     const std::string& token = sentence_arr.at(i).translation;
@@ -1749,7 +1832,6 @@ inline std::vector<std::string> tokenize(const std::string &text) {
 
       if (!current.empty())
           tokens.push_back(current);
-
       return tokens;
   }
 
