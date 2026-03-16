@@ -1,1 +1,0 @@
-em++ -Os -s MODULARIZE=1 -s EXPORT_ES6=1 -s ENVIRONMENT=web -s SINGLE_FILE=1 -s WASM=1 -s FILESYSTEM=1 -s ALLOW_MEMORY_GROWTH=1 -s NO_EXIT_RUNTIME=1 -s ASSERTIONS=0 -s DISABLE_EXCEPTION_CATCHING=0 -lembind -I../../src ./compiler_wasm.cpp -o lang_it_compiler.js
