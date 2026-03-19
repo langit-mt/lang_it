@@ -69,20 +69,12 @@ enum AFFIX_TYPE {
 };
 #define LOOKUP(DICTIONARY, TYPE, WORD, GENDER_FROM, GENDER_TO, PLURAL_FROM, PLURAL_TO)          \
 {                                                                       \
-    GenderResult g = detect_gender(WORD, GENDER_FROM);                  \
     MorphResult p = detect_plural(WORD, PLURAL_FROM); \
             /*DEFAULT */         \
     if (const char* result = lookup(DICTIONARY, WORD.c_str())) {                \
         uint16_t flags = lookupFlags(DICTIONARY, WORD.c_str()); \
         return { WORD, normalize(result), TYPE, 0, flags };                       \
     }                             \
-                 /*GENDER BUT SINGULAR */                               \
-    if (const char* result = lookup(DICTIONARY, g.root.c_str())) {      \
-        uint16_t flags = lookupFlags(DICTIONARY, g.root.c_str()); \
-        std::string translation = result;                                \
-        translation = apply_gender(translation, g.matched_variation, GENDER_TO); \
-        return { WORD, normalize(translation), TYPE, 0, flags };                   \
-    }                                                                   \
         /* ALL KINDS OF MORPHS LOL*/  \
     if (const char* result = lookup(DICTIONARY, p.root.c_str())) {      \
         uint16_t flags = lookupFlags(DICTIONARY, p.root.c_str()); \
@@ -98,7 +90,6 @@ enum AFFIX_TYPE {
 }\
 }
 
-#define NO_GENDER (Gender*)nullptr
 #define NO_PLURAL (Morph*)nullptr
 #define NO_CASE (Case*)nullptr
 
@@ -501,21 +492,6 @@ struct CaseResult {
 };
 
 
-struct GenderVariation {
-    uint8_t flag;
-    std::string form;
-};
-
-struct Gender {
-    int type; 
-    std::vector<GenderVariation> variations;
-};
-
-struct GenderResult {
-    std::string root;
-    const GenderVariation* matched_variation; 
-};
-
 enum Morphology {
    PLURAL_MORPH = 0,
    DIMINUTIVE_MORPH = 1,
@@ -523,7 +499,8 @@ enum Morphology {
    COMPARATIVE_MORPH = 3,
    SUPERLATIVE_MORPH = 4,
    DEFINITE_MORPH = 5,
-   AGENT_MORPH = 6
+   AGENT_MORPH = 6,
+   GENDER_MORPH = 7
 
 };
 
@@ -618,23 +595,6 @@ inline std::string apply_case(
         return var.form;
 }
 
-inline GenderResult detect_gender(const std::string& word, const Gender* gender_from) {
-    if (!gender_from) {
-        return { word, nullptr };
-    }
-
-    for (const auto& var : gender_from->variations) {
-        const std::string& suffix = var.form;
-
-        if (word.size() >= suffix.size() &&
-            word.compare(word.size() - suffix.size(), suffix.size(), suffix) == 0)
-        {
-            std::string root = word.substr(0, word.size() - suffix.size());
-            return { root, &var };
-        }
-    }
-    return { word, nullptr };
-}
 
 
 inline MorphResult detect_plural(const std::string& word, const Morph* plural_from) {
@@ -658,35 +618,6 @@ inline MorphResult detect_plural(const std::string& word, const Morph* plural_fr
     return { word, nullptr };
 }
 
-
-
-
-inline std::string apply_gender(
-    const std::string& translation,
-    const GenderVariation* from_var,
-    const Gender* gender_to)
-{
-    if (!gender_to)
-        return translation;
-
-    // NON → GENDERED
-    if (!from_var) {
-        if (!gender_to->variations.empty())
-            return translation + gender_to->variations[0].form;
-        return translation;
-    }
-
-    // GENDERED → GENDERED
-    for (const auto& to_var : gender_to->variations) {
-        if (to_var.flag == from_var->flag)
-            return translation + to_var.form;
-    }
-
-    // fallback
-    return translation;
-}
-
-
 inline std::string apply_morph(
     const std::string& translation,
     const MorphVariation* from_var,
@@ -701,53 +632,38 @@ inline std::string apply_morph(
     for (const auto& var : morph_to->variations) {
         if (var.morphology == source_morph) { 
             
-            // Check flags if needed
             if ((var.flag & word_gender) == var.flag) {
                 const std::string& ending = var.ending;
                 const std::string& form   = var.form;
                 
-                switch(source_morph){
-                case SUFFIX:
-                  if (translation.size() >= ending.size() &&
+                if (translation.size() >= ending.size() &&
                     translation.compare(translation.size() - ending.size(), ending.size(), ending) == 0) 
                 {
-                    // what type of transformation are we doing
-                        switch (var.type) {
-                            case SUFFIX:
-                                if (translation.size() >= ending.size() &&
-                                    translation.compare(translation.size() - ending.size(), ending.size(), ending) == 0) 
-                                {
-                                    return translation.substr(0, translation.size() - ending.size()) + form;
-                                }
-                                break;
-                                
-                            case PREFIX:
-                                if (translation.size() >= ending.size() &&
-                                    translation.compare(0, ending.size(), ending) == 0)
-                                {
-                                    return translation.substr(ending.size()) + form;
-                                }
-                                break;
-                                
-                            case PREV_WORD:
-                                return form + translation;  // "大" + "犬", "big" + "dog"
-                                
-                            case NEXT_WORD:
-                                return translation + form;  // "犬" + "たち",
-                                
-                            // etc.
-                        }}
-                break;
-                case PREV_WORD:
-                if (translation.size() >= ending.size() &&
-                    translation.compare(translation.size() - ending.size(), ending.size(), ending) == 0)
-                break;
+                    switch (var.type) {
+                        case SUFFIX:
+                            return translation.substr(0, translation.size() - ending.size()) + form;
+                            
+                        case PREFIX:
+                            // Note: PREFIX would check beginning of word, not end
+                            if (translation.size() >= ending.size() &&
+                                translation.compare(0, ending.size(), ending) == 0)
+                            {
+                                return translation.substr(ending.size()) + form;
+                            }
+                            break;
+                            
+                        case PREV_WORD:
+                            return form + translation;  // "大" + "犬", "big" + "dog"
+                            
+                        case NEXT_WORD:
+                            return translation + form;  // "犬" + "たち"
+                            
+                    }
+                }
             }
-        }
         }
     }
 
-    // fallback
     return translation;
 }
 typedef struct 
@@ -799,7 +715,6 @@ using VerbConjugationDictionary = std::vector<VerbConjugation>;
 #define LIST(name, ...) std::vector<SuffixRule> name = __VA_ARGS__
 
 #define MORPH_DEF(name,...) Morph name = {__VA_ARGS__}
-#define GENDER_DEF(name,...) Gender name = {__VA_ARGS__}
 #define CASE_DEF(name,...) Case name = {__VA_ARGS__}
 
 
@@ -2274,13 +2189,10 @@ inline std::string temp_required_ending;
 inline std::string temp_affix;
 inline uint8_t temp_type = 0;
 
-
 // whenever parsing the binary, use push_back instead of [i] = value to add new entries.
 VERB_ENDINGS(default_endings, {
    {{""}, NONE, INFINITIVE}
 });
-
-inline int conjugations_length = 0;
 
 VERB_CONJUGATIONS(default_conjugations, 
 {
@@ -2448,7 +2360,6 @@ inline std::string load_from_bin(const uint8_t* file, size_t size)
     std::string to = "";
     default_endings.clear();
     default_conjugations.clear();
-    conjugations_length = 0;
     nouns_length = 0;
     verbs_length = 0;
     adjective_length = 0;
@@ -2605,7 +2516,6 @@ case 0xF2:
         conj.affix = temp_affix;
         
         default_conjugations.push_back(conj);
-        conjugations_length++;
     }
        else if (current_area == 5) {
         // Create normalization rule
