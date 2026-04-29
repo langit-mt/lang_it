@@ -10,6 +10,13 @@
 #include <cstddef>
 #include <iostream>
 
+
+inline bool endsWith(const std::string& str, const std::string& suffix) {
+    return (str.size() >= suffix.size()) && 
+           (str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0);
+}
+
+
 #define INIT_REORDER()\
     bool one_ = (i > 0);\
     bool two_ = (i >= 1);\
@@ -63,66 +70,64 @@ enum AFFIX_TYPE {
     NEXT_WORD = 3,
     INFIX = 4,
     CIRCUMFIX = 5,
-    REDUPLICATION = 6,
-    MIDDLE_WORD = 7,
-    NONE = 8
+    TOTAL_REDUPLICATION = 6,
+    PARTIAL_REDUPLICATION_PREFIX = 7,
+    MIDDLE_WORD = 8,
+    TEMPLATE = 9,
+    NONE = 10
 };
-#define LOOKUP(DICTIONARY, TYPE, WORD, GENDER_FROM, GENDER_TO, PLURAL_FROM, PLURAL_TO)          \
+#define LOOKUP(DICTIONARY, TYPE, WORD, MORPH_FROM, MORPH_TO)          \
 {                                                                       \
-    GenderResult g = detect_gender(WORD, GENDER_FROM);                  \
-    MorphResult p = detect_plural(WORD, PLURAL_FROM); \
+    MorphResult p = detect_morph(WORD, MORPH_FROM); \
             /*DEFAULT */         \
     if (const char* result = lookup(DICTIONARY, WORD.c_str())) {                \
         uint16_t flags = lookupFlags(DICTIONARY, WORD.c_str()); \
         return { WORD, normalize(result), TYPE, 0, flags };                       \
     }                             \
-                 /*GENDER BUT SINGULAR */                               \
-    if (const char* result = lookup(DICTIONARY, g.root.c_str())) {      \
-        uint16_t flags = lookupFlags(DICTIONARY, g.root.c_str()); \
-        std::string translation = result;                                \
-        translation = apply_gender(translation, g.matched_variation, GENDER_TO); \
-        return { WORD, normalize(translation), TYPE, 0, flags };                   \
-    }                                                                   \
         /* ALL KINDS OF MORPHS LOL*/  \
-    if (const char* result = lookup(DICTIONARY, p.root.c_str())) {      \
-        uint16_t flags = lookupFlags(DICTIONARY, p.root.c_str()); \
-        std::string translation = result;                                \
-        translation = apply_morph(translation, p.matched_variation, PLURAL_TO, flags); \
-        return { WORD, normalize(translation), TYPE, 0, flags };                   \
-    }  \
-    if(WORD.length() > 3){\
-       if (auto_correct(DICTIONARY, WORD)) {                \
-        uint16_t flags = lookupFlags(DICTIONARY, auto_correct(DICTIONARY, WORD)); \
-        return { WORD, normalize(auto_correct(DICTIONARY, WORD)), TYPE, 0, flags };                       \
-    }\
-}\
+     if (MORPH_FROM != nullptr) { \
+     MorphResult p = detect_morph(WORD, MORPH_FROM);\
+        if (const char* result = lookup(DICTIONARY, p.root.c_str())) {      \
+            uint16_t flags = lookupFlags(DICTIONARY, p.root.c_str()); \
+            std::string translation = result;                                \
+            /* Check if the matched variation should apply to this word type */ \
+            if (p.matched_variation != nullptr) { \
+                if (p.matched_variation->apply_only_to.empty()) { \
+                   translation = apply_morph(translation, p.matched_variation, MORPH_TO, flags);\
+                } else { \
+                    for (int allowed_type : p.matched_variation->apply_only_to) { \
+                        if (TYPE == allowed_type) { \
+                      translation = apply_morph(translation, p.matched_variation, MORPH_TO, flags);\
+                            break; \
+                        } \
+                    } \
+                } \
+            } \
+            return { WORD, normalize(translation), TYPE, 0, flags }; \
+        } \
+    } \
 }
 
-#define NO_GENDER (Gender*)nullptr
-#define NO_PLURAL (Morph*)nullptr
+#define NO_MORPH (Morph*)nullptr
 #define NO_CASE (Case*)nullptr
-
-
-enum SCRIPTS {
-    LATIN = 0,
-    CYRILIC = 2,
-    HAN = 3,
-    KANA = 4,
-    ARABIC = 5,
-    PERSIAN = 6,
-    HANGUL = 7
-};
-
+#define MORPH_ALL {}
 
 
 typedef struct  {
    int type; // how does it act?
    int word; // what word does it act upon, A or B?
    int order; // A * B or B * A?
-   uint8_t flags;
+   uint16_t flags;
    std::string addition; 
 
 } GenitiveConstruction;
+
+typedef struct  {
+   int type; // how does it act? e.g suffix, prefix, prev word
+   std::string addition; // like "[o] cachorro, [the] dog, hund[en]"
+   uint16_t flags; // e.g in swedish EN vs ETT (utrum vs neutrum)
+} Definiteness;
+
 
 enum AdjectiveOrder {
    ADJECTIVE_FIRST = 0,
@@ -135,11 +140,20 @@ typedef struct {
    
    GenitiveConstruction gc_from[10]; 
    GenitiveConstruction gc_to[10];   
-   AdjectiveOrder ao_from;
-   AdjectiveOrder ao_to;
+
    int gc_from_count;                
    int gc_to_count;  
    
+   AdjectiveOrder ao_from;
+   AdjectiveOrder ao_to;
+
+   
+   Definiteness def_from[10]; 
+   Definiteness def_to[10];   
+   
+   int def_from_count;                
+   int def_to_count;  
+
    int scripts_from[4];
    int scripts_to[4];
 } Info;
@@ -293,11 +307,21 @@ inline std::string remove_ending_multibyte(const std::string& str, const std::st
                                         translation.size() - conj.required_ending.size()); \
                                  }                                        \
                                                                            \
-                                if (conj.type == PREFIX) {              \
-                                    prefix = conj.affix;                \
-                                } else {                                 \
-                                    suffix = conj.affix;                \
-                                }                                        \
+                            if (conj.type == PREFIX) {\
+    prefix = conj.affix;\
+} else if (conj.type == PREV_WORD) {\
+    prefix = conj.affix;\
+    if (!prefix.empty() && prefix.back() != ' ') {\
+        prefix = prefix + " ";\
+    }\
+} else if (conj.type == SUFFIX) {\
+    suffix = conj.affix;\
+} else if (conj.type == NEXT_WORD) {\
+    suffix = conj.affix;\
+    if (!suffix.empty() && suffix.front() != ' ') {\
+        suffix = " " + suffix;\
+    }\
+}\
                                 translation = stem;                     \
                                 conjugation_applied = true;              \
                                 break;                                   \
@@ -312,7 +336,20 @@ inline std::string remove_ending_multibyte(const std::string& str, const std::st
             }                                                            \
         }                                                                \
     }                                                                    \
-   return Word{ WORD, WORD, -1 };                                       \
+                                                                           \
+    /* If no verb conjugation matched, try morphological derivation */    \
+    MorphResult morph_res = detect_morph(WORD, MORPH_FROM);               \
+    if (morph_res.matched_variation) {                                    \
+        Verb v = verb_lookup(DICTIONARY, morph_res.root.c_str());         \
+        if (v.translation && *v.translation) {                            \
+            std::string translation = v.translation;                      \
+            translation = apply_morph(translation, morph_res.matched_variation, MORPH_TO, 0); \
+            int final_type = morph_res.matched_variation->result_type;    \
+            if (final_type == -1) final_type = VERB; /* fallback */       \
+            return Word{ WORD, normalize(translation), final_type, 0, v.flags }; \
+        }                                                                  \
+    }                                                                      \
+                                                                           \
 }
 
    #define SUFFIX_LOOKUP(DICTIONARY, WORD, ADJECTIVES)                         \
@@ -389,75 +426,21 @@ enum NORMALIZATION_RULES {
         }                                                            \
     } while(0)
 
-
-    
-
-
-
-// pairs
-
-#if defined(PT_EN) || defined(ALL) 
-std::string traduzir_en(const char* sentence, bool auto_correct);
-#endif
-
-#if defined(PT_MBL) || defined(ALL) 
-std::string pt_mbl(const char* sentence);
-#endif
-
-#if defined(JA_MBL) || defined(ALL) 
-std::string ja_mbl(const char* sentence);
-#endif
-
-
-#if defined(AR_TH) || defined(ALL) 
-std::string ar_th(const char* sentence);
-#endif
-
-
-#if defined(PT_RU) || defined(ALL) 
-std::string pt_ru(const char* sentence);
-#endif
-
-#if defined(PT_JA) || defined(ALL) 
-std::string pt_ja(const char* sentence);
-#endif
-
-#if defined(AA_BB) || defined(ALL) 
-std::string aa_bb(const char* sentence);
-#endif
-
-#if defined(PT_ES) || defined(ALL)
-std::string pt_es(const char* sentence);
-#endif
-
-#if defined(EN_JA) || defined(ALL)
-std::string translate_ja(const char* sentence, int script);
-#endif
-
-#if defined(MA_ZH) || defined(ALL)
-std::string ma_zh(const char* sentence);
-#endif
-
-
-#if defined(EN_PT) || defined(ALL)
-std::string translate_pt(const char* sentence);
-#endif
-
-#if defined(PT_SV) || defined(ALL)
-std::string traduzir_sv(const char* sentence);
-#endif
-
-
-#if defined(ZH_EN) || defined(ALL)
-std::string translate_zh(const char* sentence);
-#endif
-
-
 /* ------- GLOBAL CORE FUNCTIONS -----------
 |           all pairs use                  |  
 ------------------------------------------*/
 
 
+typedef struct {
+
+    std::string prefix;
+    std::string suffix;
+} Circumfix;
+
+typedef struct {
+    std::string infix;
+    int pos;
+} Infix;
 
 typedef struct {
     const char* w;
@@ -470,7 +453,7 @@ struct Verb {
     const char* root;       
     const char* translation; 
     int type;      
-    uint8_t flags;
+    uint16_t flags;
 };
 
 
@@ -501,21 +484,6 @@ struct CaseResult {
 };
 
 
-struct GenderVariation {
-    uint8_t flag;
-    std::string form;
-};
-
-struct Gender {
-    int type; 
-    std::vector<GenderVariation> variations;
-};
-
-struct GenderResult {
-    std::string root;
-    const GenderVariation* matched_variation; 
-};
-
 enum Morphology {
    PLURAL_MORPH = 0,
    DIMINUTIVE_MORPH = 1,
@@ -523,7 +491,10 @@ enum Morphology {
    COMPARATIVE_MORPH = 3,
    SUPERLATIVE_MORPH = 4,
    DEFINITE_MORPH = 5,
-   AGENT_MORPH = 6
+   AGENT_MORPH = 6,
+   GENDER_MORPH = 7,
+   AGENTIZE_DEVERB = 8,
+   RECIPROCITY = 9
 
 };
 
@@ -534,6 +505,8 @@ struct MorphVariation {
     std::string form;
     int type;
     int morphology;
+    int result_type;
+    std::vector<int> apply_only_to;
 };
 
 struct Morph {
@@ -618,33 +591,59 @@ inline std::string apply_case(
         return var.form;
 }
 
-inline GenderResult detect_gender(const std::string& word, const Gender* gender_from) {
-    if (!gender_from) {
+
+
+inline MorphResult detect_morph(const std::string& word, const Morph* morph_from) {
+    if (!morph_from) {
         return { word, nullptr };
     }
 
-    for (const auto& var : gender_from->variations) {
-        const std::string& suffix = var.form;
+    for (const auto& var : morph_from->variations) {
+        
+        int type = var.type;  
 
-        if (word.size() >= suffix.size() &&
-            word.compare(word.size() - suffix.size(), suffix.size(), suffix) == 0)
+        switch(type){
+       
+         case PREV_WORD:
+{}
+        break;
+        case NEXT_WORD:
+
+        break;
+        case TOTAL_REDUPLICATION:
+
+        break;
+        case PARTIAL_REDUPLICATION_PREFIX:
+        
+        break;
+        case CIRCUMFIX:
+          {  
+            const std::string& full_circumfix = var.ending; 
+        std::string delimiter = "$"; //common delimiter i use is '$'
+        //get the prefix
+        std::string pre = full_circumfix.substr(0, full_circumfix.find(delimiter));
+               //get the suffix
+         std::string suf = full_circumfix.substr((full_circumfix.find(delimiter) + 1), full_circumfix.length());
+    
+         // if the word length can afford (?) to have this circumfix
+        if (word.size() >= full_circumfix.size()
+        // does it start with the prefix?
+       && word.substr(0, pre.length()) == pre
+       // does it end wiht the suffix?
+       && word.substr(word.length() - suf.length()) == suf)
         {
-            std::string root = word.substr(0, word.size() - suffix.size());
-            return { root, &var };
+            std::string root = word.substr(pre.length(), word.length());
+        // std::cout << "\nhere is the first part: " << pre;
+        // std::cout << "\nhere is the last part: " << suf;
+        return {root.substr(0, root.length() - suf.length()), &var};
         }
     }
-    return { word, nullptr };
-}
+        break;
 
-
-inline MorphResult detect_plural(const std::string& word, const Morph* plural_from) {
-    if (!plural_from) {
-        return { word, nullptr };
-    }
-
-    for (const auto& var : plural_from->variations) {
+         case SUFFIX:
+        {
         const std::string& plural_ending = var.ending; 
-        const std::string& singular_ending = var.form;    
+        const std::string& singular_ending = var.form;  
         
         if (word.size() >= plural_ending.size() &&
             word.compare(word.size() - plural_ending.size(), plural_ending.size(), plural_ending) == 0)
@@ -652,40 +651,23 @@ inline MorphResult detect_plural(const std::string& word, const Morph* plural_fr
             std::string base = word.substr(0, word.size() - plural_ending.size());
             std::string root = base + singular_ending;
             return { root, &var };
-        }
+        }}
+        break;
+
+        case PREFIX:
+         const std::string& prefix = var.ending; 
+         if (word.size() > prefix.size()
+             && word.substr(0, prefix.length()) == prefix
+        ){
+             std::string root = word.substr(prefix.length(), word.length());
+             return { root, &var };
+         }
+        break;
+    }
     }
     
     return { word, nullptr };
 }
-
-
-
-
-inline std::string apply_gender(
-    const std::string& translation,
-    const GenderVariation* from_var,
-    const Gender* gender_to)
-{
-    if (!gender_to)
-        return translation;
-
-    // NON → GENDERED
-    if (!from_var) {
-        if (!gender_to->variations.empty())
-            return translation + gender_to->variations[0].form;
-        return translation;
-    }
-
-    // GENDERED → GENDERED
-    for (const auto& to_var : gender_to->variations) {
-        if (to_var.flag == from_var->flag)
-            return translation + to_var.form;
-    }
-
-    // fallback
-    return translation;
-}
-
 
 inline std::string apply_morph(
     const std::string& translation,
@@ -699,55 +681,51 @@ inline std::string apply_morph(
     int source_morph = from_var->morphology; 
 
     for (const auto& var : morph_to->variations) {
+        
         if (var.morphology == source_morph) { 
             
-            // Check flags if needed
-            if ((var.flag & word_gender) == var.flag) {
                 const std::string& ending = var.ending;
                 const std::string& form   = var.form;
-                
-                switch(source_morph){
-                case SUFFIX:
-                  if (translation.size() >= ending.size() &&
-                    translation.compare(translation.size() - ending.size(), ending.size(), ending) == 0) 
-                {
-                    // what type of transformation are we doing
-                        switch (var.type) {
-                            case SUFFIX:
-                                if (translation.size() >= ending.size() &&
-                                    translation.compare(translation.size() - ending.size(), ending.size(), ending) == 0) 
-                                {
-                                    return translation.substr(0, translation.size() - ending.size()) + form;
-                                }
-                                break;
-                                
-                            case PREFIX:
-                                if (translation.size() >= ending.size() &&
-                                    translation.compare(0, ending.size(), ending) == 0)
-                                {
-                                    return translation.substr(ending.size()) + form;
-                                }
-                                break;
-                                
-                            case PREV_WORD:
-                                return form + translation;  // "大" + "犬", "big" + "dog"
-                                
-                            case NEXT_WORD:
-                                return translation + form;  // "犬" + "たち",
-                                
-                            // etc.
-                        }}
-                break;
-                case PREV_WORD:
                 if (translation.size() >= ending.size() &&
-                    translation.compare(translation.size() - ending.size(), ending.size(), ending) == 0)
-                break;
+                    translation.compare(translation.size() - ending.size(), ending.size(), ending) == 0 && var.flag == from_var->flag) 
+                {
+                    switch (var.type) {
+                        case SUFFIX:
+                            return translation.substr(0, translation.size() - ending.size()) + form;
+                            
+                        case PREFIX:
+                            if (translation.size() >= ending.size() &&
+                                translation.compare(0, ending.size(), ending) == 0)
+                            {
+                                return translation.substr(ending.size()) + form;
+                            }
+                            break;
+                            
+                        case PREV_WORD:
+                            return form + " " + translation; 
+                        break;
+                            
+                        case NEXT_WORD:
+                            return translation + form;  
+                        break;
+
+                        case CIRCUMFIX:
+                        const std::string& full_circumfix = form; 
+                        std::string delimiter = "$"; //common delimiter i use is '$'
+                        //get the prefix
+                        std::string pre = full_circumfix.substr(0, full_circumfix.find(delimiter));
+                            //get the suffix
+                        std::string suf = full_circumfix.substr((full_circumfix.find(delimiter) + 1), full_circumfix.length());
+                           
+                          return pre + translation + suf;  
+                         break;
+                            
+                    }
+                }
             }
         }
-        }
-    }
+    
 
-    // fallback
     return translation;
 }
 typedef struct 
@@ -763,6 +741,7 @@ typedef struct
     int type;       
     std::string required_ending;
     std::string affix;
+    uint16_t flags;
 } VerbConjugation;
 
 using Dictionary = Entry[];
@@ -798,9 +777,8 @@ using VerbConjugationDictionary = std::vector<VerbConjugation>;
 #define SUFFIX_RULES(name, ...) constexpr SuffixDictionary name = __VA_ARGS__
 #define LIST(name, ...) std::vector<SuffixRule> name = __VA_ARGS__
 
-#define MORPH_DEF(name,...) Morph name = {__VA_ARGS__}
-#define GENDER_DEF(name,...) Gender name = {__VA_ARGS__}
-#define CASE_DEF(name,...) Case name = {__VA_ARGS__}
+#define MORPH_DEF(name,...) inline Morph name = {__VA_ARGS__}
+#define CASE_DEF(name,...) inline Case name = {__VA_ARGS__}
 
 
 #define VERB_ENDINGS(name, ...) inline VerbRuleDictionary name = __VA_ARGS__
@@ -995,7 +973,7 @@ std::string name(const char* sentence) { \
             auto &next = reordered_arr.at(i + 1); \
             Word current_translation_temp = reordered_arr.at(i); \
             Word next_translation_temp = reordered_arr.at(i + 1); \
-            if (current.type == 3 && (next.type == 0 || next.type == 4 || next.type == -1)) { \
+            if (current.type == 3 && (next.type == 0 || next.type == 4)) { \
                 uint8_t f = lookupFlags(nouns, next.word.c_str()); \
                 CaseResult g = detect_case(current.word, FROM_CASE); \
                 if ((INFO_ARG)->clause_order_to == SVO) { \
@@ -1007,21 +985,59 @@ std::string name(const char* sentence) { \
             } \
         } \
     }
+    // have to rename this to general abstractions, sinc it doesnt handle only posession, but also adjective order, definiteness and futurally more
 #define HANDLE_POSSESSION(INFO_ARG, ARR) \
     do { \
-                if ((ARR).size() >= 2) { \
-                    std::vector<Word> replacement; \
-                    AdjectiveOrder ao_from = (INFO_ARG)->ao_from; \
-                    AdjectiveOrder ao_to = (INFO_ARG)->ao_to; \
-                      for (size_t i = 0; i + 1 < (ARR).size(); ++i) { \
-                        if(ao_from != ao_to && (((ARR)[i].type == NOUN &&  (ARR)[i + 1].type == ADJECTIVE) || ((ARR)[i].type == NOUN &&  (ARR)[i + 1].type == ADJECTIVE))){\
-                          Word temp_word_i = (ARR)[i];\
-                          Word temp_word_i_ = (ARR)[i + 1];\
-                          (ARR)[i] = temp_word_i_;\
-                          (ARR)[i + 1] = temp_word_i;\
-                        }\
-                      }\
+       if ((ARR).size() >= 1) { \
+            bool found = false; \
+            for (int p_i = 0; p_i < (INFO_ARG)->def_from_count && !found; ++p_i) { \
+                Definiteness def_from = (INFO_ARG)->def_from[p_i]; \
+                int type_from = def_from.type; \
+                if(type_from == PREFIX || type_from == SUFFIX || type_from == CIRCUMFIX || type_from == INFIX) { \
+                    for (size_t i = 0; i < (ARR).size() && !found; ++i) { \
+                        if (type_from == SUFFIX) { \
+                            if(endsWith((ARR)[i].word, def_from.addition)) { \
+                                 found = true; \
+                            } \
+                        } \
+                        if (type_from == PREFIX) { \
+                            if((ARR)[i].word.substr(0, def_from.addition.length()) == def_from.addition) { \
+                                found = true; \
+                            } \
+                        } \
+                    } \
+             } else { \
+    for (size_t i = 1; i < (ARR).size() && !found; ++i) { \
+        if (type_from == PREV_WORD) { \
+                    if ((ARR)[i - 1].word == def_from.addition) { \
+                        for (int t_i = 0; t_i < (INFO_ARG)->def_to_count && !found; ++t_i) { \
+                            Definiteness def_to = (INFO_ARG)->def_to[t_i]; \
+                            if ((def_from.flags == 0 && def_to.flags == 0) || \
+                                (def_from.flags != 0 && (def_to.flags & def_from.flags))) { \
+                               (ARR)[i - 1].translation = def_to.addition + " " + (ARR)[i].translation; \
+                                    (ARR).erase((ARR).begin() + i); \
+                                    found = true; \
+                            } \
+                        } \
+                    } \
+                } \
+            } \
+        } \
+            } \
+        } \
+        if ((ARR).size() >= 2) { \
+            std::vector<Word> replacement; \
+            AdjectiveOrder ao_from = (INFO_ARG)->ao_from;   \
+            AdjectiveOrder ao_to = (INFO_ARG)->ao_to;       \
+            for (size_t i = 0; i + 1 < (ARR).size(); ++i) { \
+                if(ao_from != ao_to && (((ARR)[i].type == NOUN &&  (ARR)[i + 1].type == ADJECTIVE) || ((ARR)[i].type == NOUN &&  (ARR)[i + 1].type == ADJECTIVE))){\
+                  Word temp_word_i = (ARR)[i];\
+                  Word temp_word_i_ = (ARR)[i + 1];\
+                  (ARR)[i] = temp_word_i_;\
+                  (ARR)[i + 1] = temp_word_i;\
                 }\
+              }\
+        }\
         if ((ARR).size() >= 3) { \
             for (int p_i = 0; p_i < (INFO_ARG)->gc_from_count; ++p_i) { \
                 GenitiveConstruction gc_from = (INFO_ARG)->gc_from[p_i]; \
@@ -1030,31 +1046,75 @@ std::string name(const char* sentence) { \
                 bool found = false; \
                 for (size_t i = 0; i + 2 < (ARR).size() && !found; ++i) { \
                     if ((ARR)[i + 1].word != gc_from.addition) continue; \
-                      size_t idxA, idxB; \
+                    size_t idxA, idxB; \
                     if (gc_from.order == POSSESSED_FIRST) { \
-                        idxA = i;      /* A is first */ \
-                        idxB = i + 2;  /* B is last */ \
+                        idxA = i;      /* A is first (possessed) */ \
+                        idxB = i + 2;  /* B is last (owner) */ \
                     } else { /* OWNER_FIRST */ \
-                        idxA = i + 2;  /* A is last */ \
-                        idxB = i;      /* B is first */ \
+                        idxA = i + 2;  /* A is last (possessed) */ \
+                        idxB = i;      /* B is first (owner) */ \
                     } \
-                    Word A = (ARR)[idxA]; \
-                    Word B = (ARR)[idxB]; \
+                    Word A = (ARR)[idxA];  /* possessed */ \
+                    Word B = (ARR)[idxB];  /* owner */ \
                     \
-                    /* Apply target construction (use first gc_to for simplicity) */ \
+                    /* Apply target construction */ \
                     if ((INFO_ARG)->gc_to_count == 0) break; \
-                    GenitiveConstruction gc_to = (INFO_ARG)->gc_to[0]; \
+                    \
+                    /* Find the matching target construction based on flags */ \
+                    const GenitiveConstruction* matching_gc_to = nullptr; \
+                    for (int t_i = 0; t_i < (INFO_ARG)->gc_to_count; ++t_i) { \
+                        GenitiveConstruction gc_to = (INFO_ARG)->gc_to[t_i]; \
+                        /* If gc_from has a flag, match it; otherwise match the default (0) */ \
+                        if (gc_from.flags == 0) { \
+                            if (gc_to.flags == 0) { \
+                                matching_gc_to = &(INFO_ARG)->gc_to[t_i]; \
+                                break; \
+                            } \
+                        } else { \
+                            if (gc_to.flags & gc_from.flags) { \
+                                matching_gc_to = &(INFO_ARG)->gc_to[t_i]; \
+                                break; \
+                            } \
+                        } \
+                    } \
+                    \
+                    /* If no matching target found, use the first one as fallback */ \
+                    if (!matching_gc_to) { \
+                        matching_gc_to = &(INFO_ARG)->gc_to[0]; \
+                    } \
+                    \
+                    GenitiveConstruction gc_to = *matching_gc_to; \
+                    \
+                    /* Add the flag from gc_from to the possessed word */ \
+                    Word modified_possessed = A; \
+                    modified_possessed.flags |= gc_from.flags; \
                     \
                     /* Build replacement words according to target order */ \
                     std::vector<Word> replacement; \
                     if (gc_to.order == POSSESSED_FIRST) { \
-                        replacement.push_back(Word{A.word, A.translation, A.type, A.orig_flags, A.flags}); \
-                        replacement.push_back(Word{gc_to.addition, gc_to.addition, 5, 0, 0}); /* particle type */ \
-                        replacement.push_back(Word{B.word, B.translation, B.type, B.orig_flags, B.flags}); \
+                        if (gc_to.type == SUFFIX) { \
+                            /* Attach suffix directly to the possessed word */ \
+                            Word combined = modified_possessed; \
+                            combined.translation = modified_possessed.translation + gc_to.addition; \
+                            replacement.push_back(combined); \
+                            replacement.push_back(B); \
+                        } else { \
+                            replacement.push_back(modified_possessed); \
+                            replacement.push_back(Word{gc_to.addition, gc_to.addition, 5, 0, 0}); \
+                            replacement.push_back(B); \
+                        } \
                     } else { /* OWNER_FIRST */ \
-                        replacement.push_back(Word{B.word, B.translation, B.type, B.orig_flags, B.flags}); \
-                        replacement.push_back(Word{gc_to.addition, gc_to.addition, 5, 0, 0}); \
-                        replacement.push_back(Word{A.word, A.translation, A.type, A.orig_flags, A.flags}); \
+                        if (gc_to.type == SUFFIX) { \
+                            /* Attach suffix directly to the owner word */ \
+                            Word combined = B; \
+                            combined.translation = B.translation + gc_to.addition; \
+                            replacement.push_back(combined); \
+                            replacement.push_back(modified_possessed); \
+                        } else { \
+                            replacement.push_back(B); \
+                            replacement.push_back(Word{gc_to.addition, gc_to.addition, 5, 0, 0}); \
+                            replacement.push_back(modified_possessed); \
+                        } \
                     } \
                     \
                     /* Replace the three old words with the new ones */ \
@@ -1062,13 +1122,12 @@ std::string name(const char* sentence) { \
                     (ARR).insert((ARR).begin() + i, replacement.begin(), replacement.end()); \
                     \
                     found = true; \
-                    break; /* exit inner loop */ \
+                    break;\
                 } \
-                if (found) break; /* exit pattern loop after first replacement */ \
+                if (found) break;  \
             } \
         } \
     } while(0)
-
 
 enum WordType {
     NOUN = 0,
@@ -1089,57 +1148,47 @@ enum WordType {
 };
 
 enum VerbBases {
-    // TENSE (bits 15-13) - 8 values
     TENSE_MASK    = 0xE000,
     INFINITIVE    = 0x2000,
     PRESENT       = 0x4000,
     PAST          = 0x6000,
     FUTURE        = 0x8000,
     CONTINUOUS        = 0xA000,
-    TENSE6        = 0xC000,
-    TENSE7        = 0xE000,
+    AUXILIAR        = 0xC000,
+    INTRANSITIVE        = 0xE000,
     
-    // MOOD (bits 12-11) - 4 values
     MOOD_MASK     = 0x1800,
     INDICATIVE    = 0x0000,
     SUBJUNCTIVE   = 0x0800,
     IMPERATIVE    = 0x1000,
     CONDITIONAL   = 0x1800,
     
-    // ASPECT (bits 10-9) - 4 values
     ASPECT_MASK   = 0x0600,
     SIMPLE        = 0x0000,
     PERFECTIVE    = 0x0200,
     IMPERFECTIVE  = 0x0400,
-    PROGRESSIVE   = 0x0600,  // Replaced HABITUAL
+    PROGRESSIVE   = 0x0600, 
     
-    // VOICE (bit 8) - 2 values (now a single bit)
     VOICE_MASK    = 0x0100,
     ACTIVE        = 0x0000,
     PASSIVE       = 0x0100,
-    // MIDDLE and CAUSATIVE can be handled by required_ending or separate constructions
-    
-    // ANIMACY (bit 7) - 2 values (NEW!)
+
     ANIMACY_MASK  = 0x0080,
-    INANIMATE     = 0x0000,  // Default
+    INANIMATE     = 0x0000, 
     ANIMATE_V       = 0x0080,
     
-    // PERSON (bits 6-4) - 8 values (still 5 used, 3 free)
     PERSON_MASK   = 0x0070,
     FIRST_PERSON  = 0x0010,
     SECOND_PERSON = 0x0020,
     THIRD_PERSON  = 0x0030,
     FOURTH_PERSON = 0x0040,
     ZERO_PERSON   = 0x0050,
-    // 0x0060 and 0x0070 are FREE for future use
     
-    // NUMBER (bits 3-2) - 4 values
     NUMBER_MASK   = 0x000C,
     SINGULAR      = 0x0004,
     PLURAL_V        = 0x0008,
     DUAL          = 0x000C,
     
-    // GENDER (bits 1-0) - 4 values
     GENDER_MASK   = 0x0003,
     MASCULINE     = 0x0001,
     FEMININE_V      = 0x0002,
@@ -1196,7 +1245,7 @@ enum Flags: uint16_t {
     CONTRASTIVE = 1 << 9, // but
     DISJUNCTIVE = 1 << 10, // or,
     INDEFINITE = 1 << 11,
-    FREE_BIT_1 = 1 << 12,
+    PLURAL_NUMBER = 1 << 12,
     FREE_BIT_2 = 1 << 13
 };
 
@@ -1218,8 +1267,8 @@ enum VerbFlags: uint8_t {
 };
 
 enum SuffixFlags: uint8_t {
-    PLURAL = 0,
-    FEMININE = 1 << 0
+    PLURAL = 1 << 0,
+    FEMININE = 1 << 1
 };
 
 typedef struct {
@@ -2070,193 +2119,6 @@ inline bool rule(
 
 
 
-//maybe i'll move this somewhere else? it's too deterministic (even for a deterministic translator),
-// maybe when i'm not feeling as lazy i'll feed the data from the modules. idk
-// having this fixed here is completely out of place
-// this is the ugliest code you will see ever, do not pay attention to it :(
-// lowk might work tho, i'll tune the parameters later
-
-
-// inline std::string detect_language(const char* sentence) {
-//     std::string language = "Not Sure.";
-//     std::vector<std::string> tokens = tokenize(std::string(sentence));
-    
-//     #if defined(DETECT_LANGUAGE) || defined(ALL) 
-//     float en = 0.0f;
-//     float pt = 0.0f;
-//     float ja = 0.0f;
-//     float es = 0.0f;
-//     float fr = 0.0f;
-//     float zh = 0.0f;
-//     float sv = 0.0f;
-//     float my = 0.0f;
-
-//     for (size_t i = 0; i < tokens.size(); i++) {
-//         const std::string& word = tokens[i];
-
-        
-//         if(word == "o" || word == "e") {
-//             pt += 0.5f; 
-//             en += 0.5f;
-//         };
-
-//         if(word.length() > 1 && std::string(word).substr(word.length() - 2) == "ll"){
-//                    en += 1.0f;
-//         }
-//         if(word == "i") en += 0.5f;
-//         if(word == "y"){ es += 0.5f; fr += 0.4f;}
-
-//         if(word == "em" || word == "sou" || word == "eu"){ pt += 1.0f;}
-
-//         if(word == "je" || word == "moi") {fr += 1.0f;}
-
-//         if(word == "are" || word == "you") {en += 1.0f;}
-
-//         if(word == "lo" || word == "la") {es += 1.0f;}
-
-//         if(word == "tu") {fr += 0.5f; pt += 0.5f; es += 0.5f;}
-//         if(word == "te") {fr += 0.5f; pt += 0.5f; es += 0.5f;}
-//         if(word.back() == 'g') en += 7.0f;
-//         auto first_char = [](const std::string &s) -> std::string {
-//             if (s.empty()) return "";
-//             size_t len = 1;
-//             unsigned char c = static_cast<unsigned char>(s[0]);
-//             if ((c & 0x80) == 0x00) len = 1;    
-//             else if ((c & 0xE0) == 0xC0) len = 2;
-//             else if ((c & 0xF0) == 0xE0) len = 3;  
-//             else if ((c & 0xF8) == 0xF0) len = 4;  
-//             return s.substr(0, len);
-//         };
-
-//         auto last_char = [](const std::string &s) -> std::string {
-//             if (s.empty()) return "";
-//             size_t i = s.size();
-//             while (i > 0 && (static_cast<unsigned char>(s[i-1]) & 0xC0) == 0x80) --i;
-//             return s.substr(i-1);
-//         };
-
-//         if (last_char(word) == std::string("é")) { 
-//             fr += 0.7f;
-//             pt += 0.4f;
-//             es += 0.7f;
-//         }
-//         if (last_char(word) == std::string("ó")) { 
-//             pt += 0.4f;
-//             es += 0.8f;
-//         }
-//         if (first_char(word) == std::string("ç")) { 
-//             pt -= 1.0f;
-//             fr += 0.6f;
-//         }
-//         if (word.find("ñ") != std::string::npos){
-//             es += 1.0f;
-//         }
-//         if (word.find("ç") != std::string::npos){
-//             pt += 0.7f; fr += 0.6f;
-//         }
-//          if (word.find("k") != std::string::npos || word.find("y") != std::string::npos || word.find("w") != std::string::npos){
-//             pt -= 1.0f;
-//         }
-//          if (word.find("å") != std::string::npos || word.find("ä") != std::string::npos || word.find("ö") != std::string::npos){
-//             sv += 0.9f;
-//             pt -= 1.0f;
-//             en -= 1.0f;
-//             es -= 1.0f;
-//             fr -= 1.0f;
-//         }
-        
-//         if (word.find("ão") != std::string::npos)
-//            { pt += 0.9f;}
-//         if (word.find("yo") != std::string::npos)
-//             {es += 0.6f; en += 0.7f; fr -= 0.8f; ja += 0.5;
-//             }
-//         if (word.find("nh") != std::string::npos || word.find("lh") != std::string::npos){
-//             pt += 1.0f;}
-
-//         if (word.find("sh") != std::string::npos || word.find("wr") != std::string::npos || word.find("ys") != std::string::npos || word.find("hy") != std::string::npos)
-//          {   en += 1.0f;}
-
-//         if(word.find("wh") != std::string::npos)
-//          {  en += 1.0f;}
-        
-//            if (word.find("ux") != std::string::npos || word.find("ée") != std::string::npos)
-//           {  fr += 0.8f;}
-//            if (word.find("uis") != std::string::npos)
-//           {  fr += 1.0f;}
-//             if (word.find("ois") != std::string::npos)
-//           {  fr += 0.6f;pt += 0.6f;}
-//          if (word.find("um") != std::string::npos || word.find("tu") != std::string::npos)
-//           {  pt += 0.7f;}
-//            if (word.find("mbre") != std::string::npos)
-//           { 
-//             en += 0.2f;
-//              es += 0.7f;
-//         }
-
-
-//         if (word.find("ph") != std::string::npos) {
-//             en += 0.4f;
-//             fr += 0.2f;
-//         }
-//         if (word.find("eu") != std::string::npos) {
-//             fr += 0.3f;
-//             pt += 0.7f;
-//         }
-
-//         for (size_t j = 0; j < word.size(); ++j) {
-//             uint32_t unicode_c = next_utf8_char(word, j);
-//             does it have hiragana
-//             if (unicode_c >= 0x3040 && unicode_c <= 0x309F) ja += 1.0;
-//             does it have katakana
-//             if (unicode_c >= 0x30A0 && unicode_c <= 0x30FF) ja += 1.0;
-//             does it have ideograms?
-//             if (unicode_c >= 0x4E00 && unicode_c <= 0x9FFF){
-//                 ja += 0.5;
-//                 zh += 0.5;
-//             };
-//                 if(unicode_c == 0x6211 || unicode_c == 0x4F60 ){
-//                    ja -= 1.0;
-//                    zh += 1.0;     
-//                 }
-//         }
-//     }
-    
-//     float maxScore = en;
-//     if (pt > maxScore) maxScore = pt;
-//     if (ja > maxScore) maxScore = ja;
-//     if (es > maxScore) maxScore = es;
-//     if (fr > maxScore) maxScore = fr;
-//     if (zh > maxScore) maxScore = zh;
-//     if (sv > maxScore) maxScore = sv;
-//     if (my > maxScore) maxScore = my;
-
-//     if (maxScore == 0.0f) {
-//         language = "unknown";
-//     } else if (maxScore == en) {
-//         language = "en";
-//     } else if (maxScore == pt) {
-//         language = "pt";
-//     } else if (maxScore == ja) {
-//         language = "ja";
-//     } else if (maxScore == es) {
-//         language = "es";
-//     } else if (maxScore == fr) {
-//         language = "fr";
-//     }else if (maxScore == zh) {
-//         language = "zh";
-//     }else if (maxScore == sv) {
-//         language = "sv";
-//     }else if (maxScore == my) {
-//         language = "my";
-//     }
-//     #endif
-    
-//     return language;
-// }
-
-#ifdef ALLOW_IMPORTS
-
-
 inline bool default_multibyte = false;
 inline unsigned int ngrams_length = 0;
 static inline Entry default_fixed_ngrams[] = {
@@ -2274,19 +2136,27 @@ inline std::string temp_required_ending;
 inline std::string temp_affix;
 inline uint8_t temp_type = 0;
 
-
 // whenever parsing the binary, use push_back instead of [i] = value to add new entries.
 VERB_ENDINGS(default_endings, {
    {{""}, NONE, INFINITIVE}
 });
 
-inline int conjugations_length = 0;
-
 VERB_CONJUGATIONS(default_conjugations, 
 {
    {INFINITIVE, SUFFIX, "", "る"}
-}
-);
+});
+
+
+MORPH_DEF(default_morph_from,
+    {
+        {0, "", "", SUFFIX, NONE},
+    });
+
+MORPH_DEF(default_morph_to,
+{
+        {0, "", "", SUFFIX, NONE},
+});
+
 
 inline unsigned int adjective_length = 0;
 inline Entry default_adjectives[1000];
@@ -2363,7 +2233,6 @@ static Word default_verb_lookup(const std::string& word) {
             
             bool ends_with = false;
             if (multibyte) {
-                // Simple byte comparison works for UTF-8 suffixes
                 if (word.compare(word.size() - ending.size(), ending.size(), ending) == 0)
                     ends_with = true;
             } else {
@@ -2374,12 +2243,10 @@ static Word default_verb_lookup(const std::string& word) {
 
             std::string root = word.substr(0, word.size() - ending.size());
 
-            // Look up root in verbs dictionary
             Verb v = find_verb_in_array(default_verbs, verbs_length, root.c_str());
             if (v.translation && *v.translation) {
                 std::string translation = v.translation;
 
-                // Find matching conjugation
                 for (const auto& conj : default_conjugations) {
                     if (conj.form != group.form) continue;
 
@@ -2448,7 +2315,6 @@ inline std::string load_from_bin(const uint8_t* file, size_t size)
     std::string to = "";
     default_endings.clear();
     default_conjugations.clear();
-    conjugations_length = 0;
     nouns_length = 0;
     verbs_length = 0;
     adjective_length = 0;
@@ -2597,7 +2463,6 @@ case 0xF2:
         temp_verb_endings.clear();
     }
     else if (current_area == 4) {
-        // Create VerbConjugation from temp data
         VerbConjugation conj;
         conj.form = type; // form flags (INFINITIVE, PAST, etc.)
         conj.type = temp_type; // SUFFIX/PREFIX
@@ -2605,7 +2470,6 @@ case 0xF2:
         conj.affix = temp_affix;
         
         default_conjugations.push_back(conj);
-        conjugations_length++;
     }
        else if (current_area == 5) {
         // Create normalization rule
@@ -2842,92 +2706,6 @@ inline std::string translate_from_bin(const char* sentence,
     return translated;
 }
 
-#endif
-
-
-inline std::string translate(const char* sentence, const char* from, const char* to, int script = 2, bool auto_correct = false){
-    // script will be passed to languages that can be written in more than one script
-    // japanese (0 = kana, 1 = kana + kanji, 2 = romaji ), malay(0 = rumi, 1 = jawi) and mandarin chinese (0 = hanzi, 1 = pinyin) 
-    //  are the ones i plan to implement
-
-    std::string f(from), t(to);
-    #if defined(PT_EN) || defined(ALL)
-        if ((f == "pt" || f == "PT") && (t == "en" || t == "EN")) {
-            return traduzir_en(sentence, auto_correct);
-        }
-    #endif
-
-    #if defined(PT_MBL) || defined(ALL)
-        if ((f == "pt" || f == "PT") && (t == "mbl" || t == "MBL")) {
-            return pt_mbl(sentence);
-        }
-    #endif
-
-     #if defined(JA_MBL) || defined(ALL)
-        if ((f == "ja" || f == "JA") && (t == "mbl" || t == "MBL")) {
-            return ja_mbl(sentence);
-        }
-    #endif
-    
-     #if defined(AR_TH) || defined(ALL)
-        if ((f == "ar" || f == "AR") && (t == "th" || t == "TH")) {
-            return ar_th(sentence);
-        }
-    #endif
-
-      #if defined(PT_RU) || defined(ALL)
-        if ((f == "pt" || f == "PT") && (t == "ru" || t == "RU")) {
-            return pt_ru(sentence);
-        }
-    #endif
-    #if defined(PT_JA) || defined(ALL)
-        if ((f == "pt" || f == "PT") && (t == "ja" || t == "JA")) {
-            return pt_ja(sentence);
-        }
-    #endif
-
-    #if defined(AA_BB) || defined(ALL)
-        if ((f == "aa" || f == "AA") && (t == "bb" || t == "BB")) {
-            return aa_bb(sentence);
-        }
-    #endif
-
-
-    #if defined(PT_ES) || defined(ALL)
-        if ((f == "pt" || f == "PT") && (t == "es" || t == "ES")) {
-            return pt_es(sentence);
-        }
-    #endif
-    #if defined(PT_SV) || defined(ALL)
-        if ((f == "pt" || f == "PT") && (t == "sv" || t == "SV")) {
-            return traduzir_sv(sentence);
-        }
-    #endif
-    #if defined(EN_JA) || defined(ALL)
-        if ((f == "en" || f == "EN") && (t == "ja" || t == "JA")) {
-            return translate_ja(sentence, script);
-        }
-    #endif
-     #if defined(MA_ZH) || defined(ALL)
-      if ((f == "ma") && (t == "zh")) {
-          return ma_zh(sentence); 
-      }
-          #endif
-
-  #if defined(EN_PT) || defined(ALL)
-        if ((f == "en" || f == "EN") && (t == "pt" || t == "PT")) {
-            return translate_pt(sentence);
-        }
-    #endif
-
-#if defined(ZH_EN) || defined(ALL)
-        if ((f == "zh" || f == "ZH") && (t == "en" || t == "EN")) {
-            return translate_zh(sentence);
-        }
-#endif
-
-      return "No translation module found :(";
-}
 
 
 
@@ -3015,49 +2793,6 @@ inline std::string semantics(const std::vector<std::string>& sentence,
 
     return w;
 }
-
-
-
-/* ------- SHARED FUNCTIONS ----------------
-|           some pairs have to use         |  
-------------------------------------------*/
-
-// PT
-
-
-#if defined(PT_EN) || defined(PT_ES) || defined(ALL)
-
-//is the word visibly not imported from a different language? 
-// had to do this since stuff like 'website' is conflicting with verb ending match 'ite',
-// but if we infer wether or not the word is an import, we can stop that
-inline bool isPortuguese(const std::string& word){
-
-  bool isIt = true;
-
-  for(int i = 0; i < word.length(); ++i){
-    char letter = word[i];
-    // out of the way we know that there arent native portuguese words with w,y or k. so........  
-        if(letter == 'w' || letter == 'y' || letter == 'k'){
-             return false;
-      }
-      // there must be other syllables that could fit here to extract this info to but i'll do that another day :p
-
-    }
-    return isIt;
-}
-
-inline bool isDiminutive(const std::string& s, const char* suffix) {
-    size_t n = 0;
-    while (suffix[n] != '\0') n++; 
-    if (s.size() < n) return false;
-    for (size_t i = 0; i < n; i++) {
-        if (s[s.size() - n + i] != suffix[i]) return false;
-    }
-    return true;
-}
-
-
-#endif
 
 
 

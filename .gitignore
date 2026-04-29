@@ -33,3 +33,5 @@ CMakeSettings.json
 test.cpp
 test
 lang_it.cpp
+lgit.cpp
+*.lang

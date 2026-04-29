@@ -1,42 +1,25 @@
 cmake_minimum_required(VERSION 3.6)
 
-project(lang_it)
+project(lgit)
 
-add_library(lang_it_lib)
+add_library(lang_it_lib INTERFACE)
 
-target_sources(lang_it_lib
-   PRIVATE src/lang_it.h
-   src/pairs/pt_en.cpp
-   src/pairs/pt_es.cpp
-   src/pairs/pt_sv.cpp
-   src/pairs/en_pt.cpp
-   src/pairs/en_ja.cpp
-   src/pairs/zh_en.cpp
-   src/pairs/pt_mbl.cpp
-   src/pairs/aa_bb.cpp
-)
+target_include_directories(lang_it_lib INTERFACE src)
 
-target_include_directories(lang_it_lib PUBLIC src)
+target_compile_definitions(lang_it_lib INTERFACE ALLOW_IMPORTS)
 
-
-target_compile_definitions(lang_it_lib PUBLIC ALLOW_IMPORTS)
-
-
-target_compile_features(lang_it_lib PUBLIC cxx_std_17)
+target_compile_features(lang_it_lib INTERFACE cxx_std_17)
 
 if (MSVC)
-    target_compile_options(lang_it_lib PRIVATE /utf-8)
+    target_compile_options(lang_it_lib INTERFACE /utf-8)
 endif()
 
-add_executable(lang_it)
-target_compile_definitions(lang_it PUBLIC ALLOW_IMPORTS)
-target_sources(lang_it
-  PRIVATE lang_it.cpp
-)
+add_executable(lgit lgit.cpp)
 
-target_link_libraries(lang_it PRIVATE lang_it_lib)
+target_compile_definitions(lgit PRIVATE ALLOW_IMPORTS)
 
-install(TARGETS lang_it
+target_link_libraries(lgit PRIVATE lang_it_lib)
+
+install(TARGETS lgit
     RUNTIME DESTINATION bin
 )
-
