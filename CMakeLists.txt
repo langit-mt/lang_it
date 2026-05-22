@@ -1,25 +1,25 @@
 cmake_minimum_required(VERSION 3.6)
+project(lang_it)
 
-project(lgit)
+add_executable(lang_it lgit.cpp)
+target_include_directories(lang_it PRIVATE src)
 
-add_library(lang_it_lib INTERFACE)
-
-target_include_directories(lang_it_lib INTERFACE src)
-
-target_compile_definitions(lang_it_lib INTERFACE ALLOW_IMPORTS)
-
-target_compile_features(lang_it_lib INTERFACE cxx_std_17)
-
-if (MSVC)
-    target_compile_options(lang_it_lib INTERFACE /utf-8)
-endif()
-
-add_executable(lgit lgit.cpp)
-
-target_compile_definitions(lgit PRIVATE ALLOW_IMPORTS)
-
-target_link_libraries(lgit PRIVATE lang_it_lib)
-
-install(TARGETS lgit
-    RUNTIME DESTINATION bin
+# Maximum optimization, strip everything unnecessary
+target_compile_options(lang_it PRIVATE 
+    -O3                          # Maximum optimization
+    -fno-exceptions              # Remove exception handling
+    -fno-rtti                    # Remove RTTI
+    -fno-unwind-tables           # Remove unwind tables
+    -fno-asynchronous-unwind-tables
+    -ffunction-sections          # Allow dead code removal
+    -fdata-sections
+    -flto                        # Link-time optimization
 )
+
+target_link_options(lang_it PRIVATE 
+    -flto
+    -Wl,--gc-sections            # Remove unused sections
+    -s                           # Strip all symbols
+)
+
+install(TARGETS lang_it RUNTIME DESTINATION bin)
