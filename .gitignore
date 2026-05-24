@@ -42,3 +42,4 @@ bloaty
 etl
 *.out
 massif.*
+*.sh
