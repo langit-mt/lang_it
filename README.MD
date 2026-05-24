@@ -124,13 +124,19 @@ Module.translate_from_bin("air, chendawan", fileBuffer); // in the wasm bindings
 
 ❌ = NOT IMPLEMENTED
 
-| FEATURE          |  STATUS    |  TESTED WITH | 
-| -------------    |  ------    | -----        | 
-| Word Lookup      |   ✅       | English, Portuguese, Japanese, Spanish, French, Chinese, Malay, others.|  
-| Auto Correct     |   ⚠️       | Portuguese, English|    
-| Gender Inflection|   ✅       | Portuguese, Russian, Spanish|    
-| Multi Script     |   🆗       | Japanese (Kana/Kanji/Romaji), Chinese (Hanzi/pīnyīn), Malay(Rumi, Jawi)|  
-| Grammatical Case |   ⚠️       |   Portuguese, Russian  |   
+| FEATURE                          |  STATUS    |  TESTED WITH                                                             |  
+| -------------                    |  ------    | ---------------------------------------------------------------------    | 
+| Word Lookup                      |   ✅       | English, Portuguese, Japanese, Spanish, French, Chinese, Malay, others.|  
+| Auto Correct                     |   ⚠️       | Portuguese, English                                                    |    
+| Gender Inflection                |   ✅       | Portuguese, Russian, Spanish                                           |    
+| Multi Script                     |   🆗       | Japanese (Kana/Kanji/Romaji), Chinese (Hanzi/pīnyīn), Malay(Rumi, Jawi)|  
+| Grammatical Case                 |   ⚠️       |   Portuguese, Russian                                                  |   
+| Infixes                          |   ✅       | Tagalog                                                                |
+| Non-concatenative transfixes     |   🆗       | Maltese                                                                |
+| Reduplication                    |   🆗       | Marshallese, Pingelapese, Malay, Kham                                  |
+| Lexical Affixing / Polysynthesis |   ❌       |  Greenlandic, Yupik                                                    |
+| Agreement Propagation            |   🆗       |  Portuguese                                                            |
+
 
 -----
 

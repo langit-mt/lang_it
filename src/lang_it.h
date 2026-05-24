@@ -7,10 +7,124 @@
 #include <vector>
 #include <cstring>
 #include <cstddef>
-#include <iostream>
 
 
-inline bool endsWith(const std::string& str, const std::string& suffix) {
+
+
+#ifdef ETL_BUILD
+    #include "etl/string.h"
+    #include "etl/vector.h"
+    #include "etl/to_arithmetic.h"
+    
+    using String = etl::string<12>;
+    
+    template<typename T, size_t N = 20>
+    using Vector = etl::vector<T, N>;
+
+
+    typedef struct {
+        int scope;
+        int trigger;
+    Vector<String> vowels;
+    String insert_vowel;
+    } Harmony;
+
+    using HarmonyTable = Vector<Harmony>; 
+
+    typedef struct 
+        {
+            Vector<String> endings;
+            int type;
+            int form;
+        } VerbRule;
+
+        typedef struct 
+        {
+            int form;     
+            int type;       
+            String required_ending;
+            String affix;
+            uint16_t flags;
+            HarmonyTable* vowel_harmony;
+        } VerbConjugation;
+
+        
+
+
+    using VerbRuleDictionary = etl::vector<VerbRule, 5>;
+    using VerbConjugationDictionary = etl::vector<VerbConjugation, 5>;
+    
+    inline int string_to_int(const String& str) {
+        return etl::to_arithmetic<int>(str.c_str(), str.size());
+    }
+    
+    // Operators
+    template<size_t N1, size_t N2>
+    auto operator+(const etl::string<N1>& lhs, const etl::string<N2>& rhs) {
+        etl::string<N1 + N2> result;
+        result = lhs;
+        result += rhs;
+        return result;
+    }
+    
+    template<size_t N>
+    auto operator+(const char* lhs, const etl::string<N>& rhs) {
+        etl::string<35> result;
+        result = lhs;
+        result += rhs;
+        return result;
+    }
+    
+    template<size_t N>
+    auto operator+(const etl::string<N>& lhs, const char* rhs) {
+        etl::string<35> result;
+        result = lhs;
+        result += rhs;
+        return result;
+    }
+    
+#else
+    #include <string>
+    #include <vector>
+    
+    using String = std::string;
+    
+    typedef struct {
+    int scope;
+    int trigger;
+   Vector<String> vowels;
+   String insert_vowel;
+} Harmony;
+
+using HarmonyTable = Vector<Harmony>; 
+
+    template<typename T>
+    using Vector = std::vector<T>;
+            typedef struct 
+        {
+            Vector<String> endings;
+            int type;
+            int form;
+        } VerbRule;
+
+        typedef struct 
+        {
+            int form;     
+            int type;       
+            String required_ending;
+            String affix;
+            uint16_t flags;
+            HarmonyTable* vowel_harmony;
+        } VerbConjugation;
+    using VerbRuleDictionary = std::vector<VerbRule>;
+    using VerbConjugationDictionary = std::vector<VerbConjugation>;
+    
+    inline int string_to_int(const String& str) {
+        return std::stoi(str);
+    }
+    
+#endif
+inline bool endsWith(const String& str, const String& suffix) {
     return (str.size() >= suffix.size()) && 
            (str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0);
 }
@@ -106,9 +220,9 @@ enum AFFIX_TYPE {
         for (const auto& var : morph_from_ptr->variations) {           \
             if (var.type == TRANSFIX) {              \
                 for (const auto& dict_entry : DICTIONARY) {            \
-                    std::string dict_pattern = dict_entry.w;           \
-                    std::string tmpl = var.ending;                     \
-                    std::string reconstructed = "";                    \
+                    String dict_pattern = dict_entry.w;           \
+                    String tmpl = var.ending;                     \
+                    String reconstructed = "";                    \
                     size_t d = 0, t = 0;                               \
                     while (d < dict_pattern.size()) {                  \
                         if (dict_pattern[d] == '_') {                  \
@@ -138,7 +252,7 @@ enum AFFIX_TYPE {
                         const char* result = lookup(DICTIONARY, dict_pattern.c_str()); \
                         if (result) {                                 \
                             uint16_t flags = lookupFlags(DICTIONARY, dict_pattern.c_str()); \
-                            std::string translation = result;         \
+                            String translation = result;         \
                             const Morph* morph_to_ptr = &(MORPH_TO);   \
                             translation = apply_morph(translation, &var, morph_to_ptr, flags); \
                             return { WORD, normalize(translation), TYPE, 0, flags }; \
@@ -152,8 +266,8 @@ enum AFFIX_TYPE {
     /* REGULAR MORPHOLOGICAL DETECTION */                              \
     {                                                                   \
         const Morph* morph_from_ptr = &(MORPH_FROM);                   \
-        std::string current_word = WORD;                               \
-        std::vector<const MorphVariation*> applied_morphs;             \
+        String current_word = WORD;                               \
+        Vector<const MorphVariation*> applied_morphs;             \
         bool found_root = false;                                       \
         const char* result = nullptr;                                  \
         uint16_t flags = 0;                                            \
@@ -186,7 +300,7 @@ enum AFFIX_TYPE {
             }                                                          \
         }                                                              \
         if (found_root) {                                              \
-            std::string translation = result;                          \
+            String translation = result;                          \
             const Morph* morph_to_ptr = &(MORPH_TO);                   \
             for (auto it = applied_morphs.rbegin(); it != applied_morphs.rend(); ++it) { \
                 translation = apply_morph(translation, *it, morph_to_ptr, flags); \
@@ -215,27 +329,20 @@ enum HarmonyTriggers {
 
 };
 
-typedef struct {
-    int scope;
-    int trigger;
-   std::vector<std::string> vowels;
-   std::string insert_vowel;
-} Harmony;
 
-using HarmonyTable = std::vector<Harmony>; 
 
 typedef struct  {
    int type; // how does it act?
    int word; // what word does it act upon, A or B?
    int order; // A * B or B * A?
    uint16_t flags;
-   std::string addition; 
+   String addition; 
 
 } GenitiveConstruction;
 
 typedef struct  {
    int type; // how does it act? e.g suffix, prefix, prev word
-   std::string addition; // like "[o] cachorro, [the] dog, hund[en]"
+   String addition; // like "[o] cachorro, [the] dog, hund[en]"
    uint16_t flags; // e.g in swedish EN vs ETT (utrum vs neutrum)
    HarmonyTable* vowel_harmony;
 } Definiteness;
@@ -271,7 +378,7 @@ typedef struct {
 } Info;
 
 
-inline size_t utf8_length(const std::string& str) {
+inline size_t utf8_length(const String& str) {
     size_t len = 0;
     size_t i = 0;
     while (i < str.size()) {
@@ -286,7 +393,7 @@ inline size_t utf8_length(const std::string& str) {
     return len;
 }
 
-inline bool ends_with_multibyte(const std::string& str, const std::string& suffix) {
+inline bool ends_with_multibyte(const String& str, const String& suffix) {
     size_t str_chars = utf8_length(str);
     size_t suffix_chars = utf8_length(suffix);
     
@@ -304,10 +411,10 @@ inline bool ends_with_multibyte(const std::string& str, const std::string& suffi
         else byte_pos += 1;
     }
     
-    return str.compare(byte_pos, std::string::npos, suffix) == 0;
+    return str.compare(byte_pos, String::npos, suffix) == 0;
 }
 
-inline std::string remove_ending_multibyte(const std::string& str, const std::string& suffix) {
+inline String remove_ending_multibyte(const String& str, const String& suffix) {
     size_t str_chars = utf8_length(str);
     size_t suffix_chars = utf8_length(suffix);
     
@@ -347,15 +454,15 @@ inline std::string remove_ending_multibyte(const std::string& str, const std::st
     /* Try suffix-stripping using verb endings */                      \
     for (size_t ci = 0; ci < REG.size(); ++ci) {                       \
         for (size_t ei = 0; ei < REG[ci].endings.size(); ++ei) {       \
-            const std::string& ending = REG[ci].endings[ei];           \
+            const String& ending = REG[ci].endings[ei];           \
             int ending_form = REG[ci].form;                            \
             int ending_type = REG[ci].type;                            \
             /* NON-CONCATENATIVE TEMPLATIC DETECTION */                \
             if (ending_type == TRANSFIX) {           \
                 for (const auto& dict_entry : DICTIONARY) {            \
-                    std::string dict_pattern = dict_entry.root;        \
-                    std::string template_pattern = ending;             \
-                    std::string reconstructed = "";                    \
+                    String dict_pattern = dict_entry.root;        \
+                    String template_pattern = ending;             \
+                    String reconstructed = "";                    \
                     size_t dict_pos = 0;                               \
                     size_t temp_pos = 0;                               \
                     while (temp_pos < template_pattern.size() && dict_pos < dict_pattern.size()) { \
@@ -397,7 +504,7 @@ inline std::string remove_ending_multibyte(const std::string& str, const std::st
                     if (reconstructed == WORD) {                       \
                         Verb v = verb_lookup(DICTIONARY, dict_pattern.c_str()); \
                         if (v.translation && *v.translation) {         \
-                            std::string translation = v.translation;   \
+                            String translation = v.translation;   \
                             const Morph* morph_to_ptr = &(MORPH_TO);   \
                             /* Create temporary MorphVariation for the template */ \
                             MorphVariation temp_var;                   \
@@ -422,15 +529,15 @@ inline std::string remove_ending_multibyte(const std::string& str, const std::st
             if (WORD.compare(WORD.size() - ending.size(), ending.size(), ending) != 0) { \
                 continue;                                             \
             }                                                         \
-            std::string root = WORD.substr(0, WORD.size() - ending.size()); \
+            String root = WORD.substr(0, WORD.size() - ending.size()); \
             Verb v = verb_lookup(DICTIONARY, root.c_str());           \
             if (v.translation && *v.translation) {                    \
-                std::string translation = v.translation;              \
-                std::string affix = "";                               \
-                std::string result = translation;                     \
+                String translation = v.translation;              \
+                String affix = "";                               \
+                String result = translation;                     \
                 bool conjugation_applied = false;                     \
                 for (const auto& conj : DEF) {                        \
-                    std::string affix = conj.affix;                   \
+                    String affix = conj.affix;                   \
                     if (conj.form == ending_form) {                   \
                         bool condition_met = conj.required_ending.empty() || \
                             (translation.size() >= conj.required_ending.size() && \
@@ -438,7 +545,7 @@ inline std::string remove_ending_multibyte(const std::string& str, const std::st
                                                 conj.required_ending.size(), \
                                                 conj.required_ending) == 0); \
                         if (condition_met) {                          \
-                            std::string stem = translation;           \
+                            String stem = translation;           \
                             if (conj.vowel_harmony != nullptr) {      \
                                 const HarmonyTable& v_h = *(conj.vowel_harmony); \
                                 affix = checkVowelHarmony(stem, conj.affix, v_h); \
@@ -475,8 +582,8 @@ inline std::string remove_ending_multibyte(const std::string& str, const std::st
     if (USE_MORPH) {                                                  \
         const Morph* morph_from_ptr = &(MORPH_FROM);                  \
         const Morph* morph_to_ptr = &(MORPH_TO);                      \
-        std::string current_word = WORD;                              \
-        std::vector<const MorphVariation*> applied_morphs;            \
+        String current_word = WORD;                              \
+        Vector<const MorphVariation*> applied_morphs;            \
         bool found_root = false;                                      \
         const char* result = nullptr;                                 \
         uint16_t flags = 0;                                           \
@@ -509,7 +616,7 @@ inline std::string remove_ending_multibyte(const std::string& str, const std::st
             }                                                         \
         }                                                             \
         if (found_root) {                                             \
-            std::string translation = result;                         \
+            String translation = result;                         \
             for (auto it = applied_morphs.rbegin(); it != applied_morphs.rend(); ++it) { \
                 translation = apply_morph(translation, *it, morph_to_ptr, flags); \
             }                                                         \
@@ -520,26 +627,26 @@ inline std::string remove_ending_multibyte(const std::string& str, const std::st
 
    #define SUFFIX_LOOKUP(DICTIONARY, WORD, ADJECTIVES)                         \
 {                                                                           \
- std::string translation;\
+ String translation;\
  int word_type = 0;\
   for (int len = 6; len >= 2; --len) {\
     if (WORD.length() >= static_cast<size_t>(len)) {\
-        std::string ending = WORD.substr(WORD.length() - len);\
+        String ending = WORD.substr(WORD.length() - len);\
         Suffix suffResult = lookupSuff(DICTIONARY, ending.c_str());\
         if (suffResult.t) {\
             const char* mapped = suffResult.t;\
-            std::string stem = WORD.substr(0, WORD.length() - len);\
+            String stem = WORD.substr(0, WORD.length() - len);\
             word_type = suffResult.type;\
             const char* adjResult = lookup(ADJECTIVES, stem.c_str());\
             if (adjResult) {\
-                translation = std::string(adjResult) + mapped;\
+                translation = String(adjResult) + mapped;\
             word_type = suffResult.type;\
             }\
             else if (!stem.empty()) {\
-                std::string altStem = stem.substr(0, stem.length() - 1) + "o";\
+                String altStem = stem.substr(0, stem.length() - 1) + "o";\
                 const char* altAdj = lookup(ADJECTIVES, altStem.c_str());\
                 if (altAdj)\
-                    translation = std::string(altAdj) + mapped;\
+                    translation = String(altAdj) + mapped;\
                 else\
                     translation = stem + mapped;\
             }\
@@ -563,8 +670,8 @@ enum NORMALIZATION_RULES {
 };
 #define NORMALIZE(ORIGINAL, RULE, REPLACEMENT)                     \
     do {                                                            \
-        const std::string& orig = ORIGINAL;                         \
-        const std::string& repl = REPLACEMENT;                      \
+        const String& orig = ORIGINAL;                         \
+        const String& repl = REPLACEMENT;                      \
         size_t word_len = word.length();                            \
         size_t orig_len = orig.length();                             \
         if (word_len > orig_len) {                                   \
@@ -600,12 +707,12 @@ enum NORMALIZATION_RULES {
 
 typedef struct {
 
-    std::string prefix;
-    std::string suffix;
+    String prefix;
+    String suffix;
 } Circumfix;
 
 typedef struct {
-    std::string infix;
+    String infix;
     int pos;
 } Infix;
 
@@ -641,18 +748,18 @@ typedef struct
 struct CaseVariation {
     uint8_t flag;
     uint8_t gender;
-    std::string ending;
-    std::string form;
+    String ending;
+    String form;
     HarmonyTable* v_h;
 };
 
 struct Case {
     int type; 
-    std::vector<CaseVariation> variations;
+    Vector<CaseVariation> variations;
 };
 
 struct CaseResult {
-    std::string root;
+    String root;
     const CaseVariation* matched_variation; 
 };
 
@@ -688,12 +795,12 @@ enum AGREEMENT {
 
 struct MorphVariation {
     uint16_t  flag;
-    std::string ending;
-    std::string form;
+    String ending;
+    String form;
     int type;
     int morphology;
     int result_type;
-    std::vector<int> apply_only_to;
+    Vector<int> apply_only_to;
     int stackable;
     HarmonyTable* vowel_harmony;
     int agreement;
@@ -701,10 +808,10 @@ struct MorphVariation {
 
 
 struct Morph {
-    std::vector<MorphVariation> variations;
+    Vector<MorphVariation> variations;
 };
 struct MorphResult {
-    std::string root;
+    String root;
     const MorphVariation* matched_variation; 
 };
 // Y is considered a vowel for english reasons obviously but one day i'll see what to do, but only
@@ -719,7 +826,7 @@ inline bool isVowel(char x)
      return false;
 }
 
-inline bool isNumber(std::string x){
+inline bool isNumber(String x){
     if(x == "1" || x == "2" || x == "3" || x == "4" || x == "5" || x == "6" || x == "7" || x == "8" || x == "9"){
           return true;
     }
@@ -728,25 +835,25 @@ inline bool isNumber(std::string x){
 
 struct Letter {
     int pos;
-    std::string letter;
+    String letter;
 };
 
 
 //useful for infixation (like tagalog -um-)
-inline Letter getFirstVowel(const std::string& word){
+inline Letter getFirstVowel(const String& word){
     for (size_t i = 0; i < word.length(); i++) {
         if (isVowel(word[i])) {
-           return Letter{(int)i, std::string(1, word[i])};
+           return Letter{(int)i, String(1, word[i])};
         }
     }
     return Letter{-1, ""};  
 }
 // useful for vowel harmony, not sure how to implement within the pipeline  yet, 
 
-inline Letter getLastVowel(const std::string& word){
+inline Letter getLastVowel(const String& word){
     for (int i = (int)word.length() - 1; i >= 0; i--) {
         if (isVowel(word[i])) {
-               return Letter{(int)i, std::string(1, word[i])};
+               return Letter{(int)i, String(1, word[i])};
         }
     }
         return Letter{-1, ""}; 
@@ -757,7 +864,7 @@ inline Letter getLastVowel(const std::string& word){
 // look for the corresponding vowel for the dominant one we found
 // apply to the affix
 // return it
-inline std::string checkVowelHarmony(const std::string& word, std::string affix, const HarmonyTable& table){
+inline String checkVowelHarmony(const String& word, String affix, const HarmonyTable& table){
     Letter last_vowel = getLastVowel(word);
     if(last_vowel.letter.empty()) return affix; 
     
@@ -773,7 +880,7 @@ inline std::string checkVowelHarmony(const std::string& word, std::string affix,
         
         if(found){
             size_t pos = affix.find('_');
-            if(pos != std::string::npos){
+            if(pos != String::npos){
                 affix.replace(pos, 1, rule.insert_vowel);
             }
             break;
@@ -783,18 +890,18 @@ inline std::string checkVowelHarmony(const std::string& word, std::string affix,
     return affix;
 }
 
-inline CaseResult detect_case(const std::string& word, const Case* case_from) {
+inline CaseResult detect_case(const String& word, const Case* case_from) {
     if (!case_from) {
         return { word, nullptr };
     }
 
     for (const auto& var : case_from->variations) {
-        const std::string& suffix = var.form;
+        const String& suffix = var.form;
 
         if (word.size() >= suffix.size() &&
             word.compare(word.size() - suffix.size(), suffix.size(), suffix) == 0)
         {
-            std::string root = word.substr(0, word.size() - suffix.size());
+            String root = word.substr(0, word.size() - suffix.size());
             return { root, &var };
         }
     }
@@ -802,8 +909,8 @@ inline CaseResult detect_case(const std::string& word, const Case* case_from) {
 }
 
 
-inline std::string apply_case(
-    const std::string& translation,
+inline String apply_case(
+    const String& translation,
     const CaseVariation* from_var,
     const Case* case_to,
     uint8_t word_gender) 
@@ -818,9 +925,9 @@ inline std::string apply_case(
    for (const auto& var : case_to->variations) {
     if (!from_var || var.flag == from_var->flag) {      
         if (word_gender == 0 || (var.gender & word_gender)) {
-            const std::string& ending = var.ending;
-            const std::string& form   = var.form;
-            std::string affix = "";
+            const String& ending = var.ending;
+            const String& form   = var.form;
+            String affix = "";
 
                 if(var.v_h != nullptr){
                      const HarmonyTable& v_h = *(var.v_h); 
@@ -829,7 +936,11 @@ inline std::string apply_case(
             if (translation.size() >= ending.size() &&
                 translation.compare(translation.size() - ending.size(), ending.size(), ending) == 0) 
             {
-                return (translation.substr(0, translation.size() - ending.size()) + affix);
+                   String result = translation.substr(0, translation.size() - ending.size());
+    
+                    result += affix;
+        
+                    return result;
             }
         }
     }
@@ -837,11 +948,15 @@ inline std::string apply_case(
 
     for (const auto& var : case_to->variations) {
         if (word_gender == 0 || (var.gender & word_gender)) {
-            const std::string& ending = var.ending;
-            const std::string& form   = var.form;
+            const String& ending = var.ending;
+            const String& form   = var.form;
 
-            if (ending.length() <= translation.length())
-                return translation.substr(0, translation.length() - ending.length()) + form;
+            if (ending.length() <= translation.length()){
+                String result;
+                result = translation.substr(0, translation.size() - ending.size());
+                result += form;
+                return result;
+                ;}
             else
                 return form;
         }
@@ -864,7 +979,7 @@ inline std::string apply_case(
 
 
 
-inline MorphResult detect_morph(const std::string& word, const Morph* morph_from) {
+inline MorphResult detect_morph(const String& word, const Morph* morph_from) {
     if (!morph_from) {
         return { word, nullptr };
     }
@@ -883,16 +998,16 @@ inline MorphResult detect_morph(const std::string& word, const Morph* morph_from
         break;
       case TOTAL_REDUPLICATION:
 {
-    const std::string& trigger = var.form;
-    int times = std::stoi(trigger);
+    const String& trigger = var.form;
+    int times = string_to_int(trigger);
     int word_len = word.length();
     
     if (times == 2) {
         // is word length ian even number
         if (word_len % 2 == 0) {
             int half_len = word_len / 2;
-            std::string first_half = word.substr(0, half_len);
-            std::string second_half = word.substr(half_len);
+            String first_half = word.substr(0, half_len);
+            String second_half = word.substr(half_len);
             
             if (first_half == second_half) {
                 return { first_half, &var };
@@ -903,9 +1018,9 @@ inline MorphResult detect_morph(const std::string& word, const Morph* morph_from
         // Check if word length is divisible by 3
         if (word_len % 3 == 0) {
             int third_len = word_len / 3;
-            std::string first_third = word.substr(0, third_len);
-            std::string second_third = word.substr(third_len, third_len);
-            std::string third_third = word.substr(third_len * 2);
+            String first_third = word.substr(0, third_len);
+            String second_third = word.substr(third_len, third_len);
+            String third_third = word.substr(third_len * 2);
             
             if (first_third == second_third && first_third == third_third) {
                 return { first_third, &var };
@@ -917,9 +1032,9 @@ inline MorphResult detect_morph(const std::string& word, const Morph* morph_from
 break;
       case PARTIAL_REDUPLICATION_PREFIX:
         {
-            std::string pattern = var.ending; // like "CVC", "CV", "VC", etc.
-            std::string trigger = var.form;   // "B" for beginning, "E" for ending
-            std::string result = word;
+            String pattern = var.ending; // like "CVC", "CV", "VC", etc.
+            String trigger = var.form;   // "B" for beginning, "E" for ending
+            String result = word;
             
             if (trigger == "B") {
                 // Check if word is long enough to match pattern
@@ -989,10 +1104,10 @@ break;
 break;
 case PARTIAL_REDUPLICATION_SUFFIX:  
     {
-        std::string pattern = var.ending;
-        std::string trigger = var.form;
-        std::string result = word;
-        std::string matchedPart;
+        String pattern = var.ending;
+        String trigger = var.form;
+        String result = word;
+        String matchedPart;
         
         // look for pattern at begninning
         if (trigger == "B") {
@@ -1057,12 +1172,12 @@ case PARTIAL_REDUPLICATION_SUFFIX:
 break;
         case CIRCUMFIX:
           {  
-            const std::string& full_circumfix = var.ending; 
-        std::string delimiter = "$"; //common delimiter i use is '$'
+            const String& full_circumfix = var.ending; 
+        String delimiter = "$"; //common delimiter i use is '$'
         //get the prefix
-        std::string pre = full_circumfix.substr(0, full_circumfix.find(delimiter));
+        String pre = full_circumfix.substr(0, full_circumfix.find(delimiter));
                //get the suffix
-         std::string suf = full_circumfix.substr((full_circumfix.find(delimiter) + 1), full_circumfix.length());
+         String suf = full_circumfix.substr((full_circumfix.find(delimiter) + 1), full_circumfix.length());
     
          // if the word length can afford (?) to have this circumfix
         if (word.size() >= full_circumfix.size()
@@ -1071,7 +1186,7 @@ break;
        // does it end wiht the suffix?
        && word.substr(word.length() - suf.length()) == suf)
         {
-            std::string root = word.substr(pre.length(), word.length());
+            String root = word.substr(pre.length(), word.length());
         // std::cout << "\nhere is the first part: " << pre;
         // std::cout << "\nhere is the last part: " << suf;
         return {root.substr(0, root.length() - suf.length()), &var};
@@ -1081,31 +1196,31 @@ break;
 
          case SUFFIX:
         {
-        const std::string& plural_ending = var.ending; 
-        const std::string& singular_ending = var.form;  
+        const String& plural_ending = var.ending; 
+        const String& singular_ending = var.form;  
         
         if (word.size() >= plural_ending.size() &&
             word.compare(word.size() - plural_ending.size(), plural_ending.size(), plural_ending) == 0)
         {
-            std::string base = word.substr(0, word.size() - plural_ending.size());
-            std::string root = base + singular_ending;
+            String base = word.substr(0, word.size() - plural_ending.size());
+            String root = base + singular_ending;
             return { root, &var };
         }}
         break;
 
         case PREFIX:
-      {   const std::string& prefix = var.ending; 
+      {   const String& prefix = var.ending; 
          if (word.size() > prefix.size()
              && word.substr(0, prefix.length()) == prefix
         ){
-             std::string root = word.substr(prefix.length(), word.length());
+             String root = word.substr(prefix.length(), word.length());
              return { root, &var };
          }}
         break;
 case INFIX:
 {
-    const std::string& infix_to_remove = var.ending;
-    const std::string& trigger = var.form;
+    const String& infix_to_remove = var.ending;
+    const String& trigger = var.form;
     
     // check if trigger is a number
     bool is_number = !trigger.empty();
@@ -1117,11 +1232,11 @@ case INFIX:
     }
     // if it is just insert there
     if (is_number) {
-        int pos = std::stoi(trigger);
+        int pos =string_to_int(trigger);
         if (pos >= 0 && 
             pos + infix_to_remove.length() <= word.length() &&
             word.substr(pos, infix_to_remove.length()) == infix_to_remove) {
-            std::string root = word.substr(0, pos) + 
+            String root = word.substr(0, pos) + 
                             word.substr(pos + infix_to_remove.length());
             return { root, &var };
         }
@@ -1134,7 +1249,7 @@ case INFIX:
         if (first_vowel.pos >= 0) {
             if (first_vowel.pos + infix_to_remove.length() <= word.length() &&
                 word.substr(first_vowel.pos, infix_to_remove.length()) == infix_to_remove) {
-                std::string root = word.substr(0, first_vowel.pos) + 
+                String root = word.substr(0, first_vowel.pos) + 
                                   word.substr(first_vowel.pos + infix_to_remove.length());
                 return { root, &var };
             }
@@ -1150,8 +1265,8 @@ case INFIX:
             if (infix_start >= 0 && 
                 infix_start + infix_to_remove.length() <= word.length() &&
                 word.substr(infix_start, infix_to_remove.length()) == infix_to_remove) {
-                std::string root = word.substr(0, infix_start) + 
-                                  word.substr(last_vowel.pos);
+                String root = word.substr(0, infix_start); 
+                root +=  word.substr(last_vowel.pos);
                 return { root, &var };
             }
         }
@@ -1165,8 +1280,8 @@ break;
 }
 
 
-inline std::string apply_morph(
-    const std::string& translation,
+inline String apply_morph(
+    const String& translation,
     const MorphVariation* from_var,
     const Morph* morph_to,
     uint8_t word_gender)
@@ -1175,14 +1290,14 @@ inline std::string apply_morph(
         return translation;
 
     int source_morph = from_var->morphology; 
-
+         String result;
     for (const auto& var : morph_to->variations) {
         
         if (var.morphology == source_morph) { 
         
-        const std::string& ending = var.ending;
-        const std::string& form   = var.form;
-        std::string affix = ending;
+        const String& ending = var.ending;
+        const String& form   = var.form;
+        String affix = ending;
                 if(var.vowel_harmony != nullptr){
                        const HarmonyTable& v_h = *(var.vowel_harmony);
                         affix = checkVowelHarmony(translation, ending, v_h);
@@ -1191,9 +1306,9 @@ inline std::string apply_morph(
                 
                 // infixes and reduplication use a specific format for trigger so i'll do it apart
                 if(var.type == TOTAL_REDUPLICATION){
-                        const std::string& trigger = var.form;
-                        int times = std::stoi(trigger);
-                        std::string result = translation;
+                        const String& trigger = var.form;
+                        int times =string_to_int(trigger);
+                        String result = translation;
                         switch (times)
                         {
                         case 2:       
@@ -1209,10 +1324,10 @@ inline std::string apply_morph(
                            return result;
                 }
                 if(var.type == PARTIAL_REDUPLICATION_PREFIX) {
-                    std::string pattern = var.ending;  // like "CVC", "CV", "VC", etc.
-                    std::string trigger = var.form;    // "B" for beginning, "E" for ending
-                    std::string result = translation;
-                    std::string matchedPart;
+                    String pattern = var.ending;  // like "CVC", "CV", "VC", etc.
+                    String trigger = var.form;    // "B" for beginning, "E" for ending
+                    String result = translation;
+                    String matchedPart;
                     
                     if (trigger == "B") {
                         if (translation.length() >= pattern.length()) {
@@ -1261,16 +1376,17 @@ inline std::string apply_morph(
                     
                     // add the reduplicated pattern to  BEGINNING ( cause PREFIX)
                     if (!matchedPart.empty()) {
-                        result = matchedPart + translation;
+                        result = matchedPart;
+                        result += translation;
                     }
                     
                     return result;
                 }
                if(var.type == PARTIAL_REDUPLICATION_SUFFIX) {
-                std::string pattern = var.ending;  // like "CVC", "CV", "VC", etc.
-                std::string trigger = var.form;    // "B" for beginning, "E" for ending
-                std::string result = translation;
-                std::string matchedPart;
+                String pattern = var.ending;  // like "CVC", "CV", "VC", etc.
+                String trigger = var.form;    // "B" for beginning, "E" for ending
+                String result = translation;
+                String matchedPart;
                 
                 // find the pattern either on B eginning or E nding
                 if (trigger == "B") {
@@ -1321,16 +1437,17 @@ inline std::string apply_morph(
                 
                // add the reduplicated pattern to  ENDING ( cause SUFFIX)
                 if (!matchedPart.empty()) {
-                    result = translation + matchedPart;
+                    result = translation;
+                    result += matchedPart;
                 }
                 
                 return result;
             }
                 if (var.type == INFIX) {
                     if (var.flag == from_var->flag) {
-                        const std::string& infix_to_add = var.ending;
-                        const std::string& trigger = var.form;
-                        std::string result = translation;
+                        const String& infix_to_add = var.ending;
+                        const String& trigger = var.form;
+                        String result = translation;
                         
                         bool is_number = !trigger.empty();
                         for (char c : trigger) {
@@ -1341,7 +1458,7 @@ inline std::string apply_morph(
                         }
                         
                         if (is_number) {
-                            int pos = std::stoi(trigger);
+                            int pos =string_to_int((trigger));
                             if (pos >= 0 && pos <= (int)result.length()) {
                                 result.insert(pos, infix_to_add);
                             }
@@ -1367,30 +1484,40 @@ inline std::string apply_morph(
                     translation.compare(translation.size() - form.size(), form.size(), form) == 0)) && 
                     var.flag == from_var->flag){
                     switch (var.type) {
+                        
                         case SUFFIX:
-                            return translation.substr(0, translation.size() - form.size()) + affix;
+                            result = translation.substr(0, translation.size() - form.size());
+                            result += affix;
+                            return result;
+                            return result;
                             
                         case PREFIX:
                             if (translation.size() >= ending.size() &&
                                 translation.compare(0, ending.size(), ending) == 0)
                             {
-                                return translation.substr(form.size()) + affix;
+                                        result += translation.substr(form.size());
+                                        result += affix;
+                                        return result;
                             }
                             break;
                             
                         case PREV_WORD:
-                            return form + " " + translation; 
+                            result += form;
+                            result += " ";
+                            return translation;
                         break;
                             
                         case NEXT_WORD:
-                            return translation + affix;  
+                            result += translation;
+                            result += affix;
+                            return result;
                         break;
 
                         case TRANSFIX:
 {
-    std::string dict_pattern = translation;
-    std::string template_pattern = var.ending;
-    std::string result = "";
+    String dict_pattern = translation;
+    String template_pattern = var.ending;
+    String result = "";
     size_t dict_pos = 0;
     size_t temp_pos = 0;
     
@@ -1439,12 +1566,12 @@ inline std::string apply_morph(
 break;
 
                         case CIRCUMFIX:
-                     {   const std::string& full_circumfix = affix; 
-                        std::string delimiter = "$"; //common delimiter i use is '$'
+                     {   const String& full_circumfix = affix; 
+                        String delimiter = "$"; //common delimiter i use is '$'
                         //get the prefix
-                        std::string pre = full_circumfix.substr(0, full_circumfix.find(delimiter));
+                        String pre = full_circumfix.substr(0, full_circumfix.find(delimiter));
                             //get the suffix
-                        std::string suf = full_circumfix.substr((full_circumfix.find(delimiter) + 1), full_circumfix.length());
+                        String suf = full_circumfix.substr((full_circumfix.find(delimiter) + 1), full_circumfix.length());
                            
                           return pre + translation + suf; } 
                          break;
@@ -1457,28 +1584,11 @@ break;
 
     return translation;
 }
-typedef struct 
-{
-    std::vector<std::string> endings;
-    int type;
-    int form;
-} VerbRule;
 
-typedef struct 
-{
-    int form;     
-    int type;       
-    std::string required_ending;
-    std::string affix;
-    uint16_t flags;
-    HarmonyTable* vowel_harmony;
-} VerbConjugation;
 
 using Dictionary = Entry[];
 using VerbDictionary = Verb[];
 using SuffixDictionary = Suffix[];
-using VerbRuleDictionary = std::vector<VerbRule>;
-using VerbConjugationDictionary = std::vector<VerbConjugation>;
 
 
 
@@ -1505,7 +1615,7 @@ using VerbConjugationDictionary = std::vector<VerbConjugation>;
 #define DICT(name, ...) constexpr Dictionary name = __VA_ARGS__
 #define V_DICT(name, ...) constexpr VerbDictionary name = __VA_ARGS__
 #define SUFFIX_RULES(name, ...) constexpr SuffixDictionary name = __VA_ARGS__
-#define LIST(name, ...) std::vector<SuffixRule> name = __VA_ARGS__
+#define LIST(name, ...) Vector<SuffixRule> name = __VA_ARGS__
 
 #define MORPH_DEF(name,...) inline Morph name = {__VA_ARGS__}
 #define CASE_DEF(name,...) inline Case name = {__VA_ARGS__}
@@ -1520,20 +1630,20 @@ using VerbConjugationDictionary = std::vector<VerbConjugation>;
 
 #define COMBINE_VERB_TOKENS(INPUT, OUTPUT, VERB_DICT, ENDINGS, MAX_STEM, MAX_ENDING) \
     do { \
-        std::vector<std::string> temp; \
+        Vector<String> temp; \
         size_t i = 0; \
         while (i < (INPUT).size()) { \
             bool found = false; \
             for (size_t stem_len = (MAX_STEM); stem_len >= 1; --stem_len) { \
                 if (i + stem_len > (INPUT).size()) continue; \
-                std::string stem_candidate; \
+                String stem_candidate; \
                 for (size_t k = 0; k < stem_len; ++k) \
                     stem_candidate += (INPUT)[i + k]; \
                 Verb v = verb_lookup((VERB_DICT), stem_candidate.c_str()); \
                 if (v.translation && *v.translation) { \
                     for (size_t ending_len = (MAX_ENDING); ending_len >= 1; --ending_len) { \
                         if (i + stem_len + ending_len > (INPUT).size()) continue; \
-                        std::string ending_candidate; \
+                        String ending_candidate; \
                         for (size_t k = 0; k < ending_len; ++k) \
                             ending_candidate += (INPUT)[i + stem_len + k]; \
                         bool ending_match = false; \
@@ -1569,20 +1679,20 @@ using VerbConjugationDictionary = std::vector<VerbConjugation>;
 
 #define DEFAULT_COMBINE_VERB_TOKENS(INPUT, OUTPUT, VERB_DICT, ENDINGS, MAX_STEM, MAX_ENDING) \
     do { \
-        std::vector<std::string> temp; \
+        Vector<String> temp; \
         size_t i = 0; \
         while (i < (INPUT).size()) { \
             bool found = false; \
             for (size_t stem_len = (MAX_STEM); stem_len >= 1; --stem_len) { \
                 if (i + stem_len > (INPUT).size()) continue; \
-                std::string stem_candidate; \
+                String stem_candidate; \
                 for (size_t k = 0; k < stem_len; ++k) \
                     stem_candidate += (INPUT)[i + k]; \
                 Verb v = find_verb_in_array((VERB_DICT), verbs_length, stem_candidate.c_str());\
                 if (v.translation && *v.translation) { \
                     for (size_t ending_len = (MAX_ENDING); ending_len >= 1; --ending_len) { \
                         if (i + stem_len + ending_len > (INPUT).size()) continue; \
-                        std::string ending_candidate; \
+                        String ending_candidate; \
                         for (size_t k = 0; k < ending_len; ++k) \
                             ending_candidate += (INPUT)[i + stem_len + k]; \
                         bool ending_match = false; \
@@ -1596,7 +1706,10 @@ using VerbConjugationDictionary = std::vector<VerbConjugation>;
                             if (ending_match) break; \
                         } \
                         if (ending_match) { \
-                            temp.push_back(stem_candidate + ending_candidate); \
+                         String combined;\
+                            combined += stem_candidate;\
+                            combined += ending_candidate;\
+                            temp.push_back(combined);\
                             i += stem_len + ending_len; \
                             found = true; \
                             break; \
@@ -1616,13 +1729,13 @@ using VerbConjugationDictionary = std::vector<VerbConjugation>;
 
 #define COMBINE_VERB_STEMS(INPUT, OUTPUT, VERB_DICT, ENDINGS)              \
     do {                                                                    \
-        std::vector<Word> temp;                                             \
+        Vector<Word> temp;                                             \
         for (size_t i = 0; i < (INPUT).size(); ++i) {                      \
             bool combined = false;                                          \
             Verb v = verb_lookup(VERB_DICT, (INPUT)[i].word.c_str());      \
             if (v.translation && *v.translation) {                         \
                if (i + 1 < (INPUT).size()) {                              \
-                    const std::string& next = (INPUT)[i+1].word;           \
+                    const String& next = (INPUT)[i+1].word;           \
                     for (size_t ci = 0; ci < (ENDINGS).size(); ++ci) {     \
                         for (size_t ei = 0; ei < (ENDINGS)[ci].endings.size(); ++ei) { \
                             if (next == (ENDINGS)[ci].endings[ei]) {       \
@@ -1650,24 +1763,24 @@ using VerbConjugationDictionary = std::vector<VerbConjugation>;
 
 
 #define MAIN(name, NGRAMS, REORDER_HELPERS, LOOKUP_FUNCTION, MULTIBYTE, SPACED, VERB_ENDINGS, DICT_CHECK) \
-std::string name(const char* sentence) { \
+String name(const char* sentence) { \
     char buffer[250]; \
     strncpy(buffer, sentence, sizeof(buffer)); \
     buffer[sizeof(buffer) - 1] = '\0'; \
     to_lower(buffer); \
-    std::vector<std::string> arr; \
+    Vector<String> arr; \
     if(MULTIBYTE == true) { \
-        arr = tokenize_cjk(std::string(buffer)); \
+        arr = tokenize_cjk(String(buffer)); \
         /* 1. Combine verb stems + endings */ \
-        std::vector<std::string> verb_combined; \
+        Vector<String> verb_combined; \
         COMBINE_VERB_TOKENS(arr, verb_combined, verbs, VERB_ENDINGS, 3, 5); \
-        std::vector<std::string> final_combined; \
+        Vector<String> final_combined; \
         size_t i = 0; \
         while (i < verb_combined.size()) { \
             bool found = false; \
             for (size_t len = 4; len >= 1; --len) { \
                 if (i + len > verb_combined.size()) continue; \
-                std::string cand; \
+                String cand; \
                 for (size_t k = 0; k < len; ++k) cand += verb_combined[i + k]; \
                 if (DICT_CHECK) { \
                     final_combined.push_back(cand); \
@@ -1683,9 +1796,9 @@ std::string name(const char* sentence) { \
         } \
         arr = final_combined; \
     } else { \
-        arr = tokenize(std::string(buffer)); \
+        arr = tokenize(String(buffer)); \
     } \
-    std::string translated = trigramLookup(NGRAMS, arr, REORDER_HELPERS, LOOKUP_FUNCTION, SPACED); \
+    String translated = trigramLookup(NGRAMS, arr, REORDER_HELPERS, LOOKUP_FUNCTION, SPACED); \
     return translated; \
 }
 
@@ -1746,7 +1859,7 @@ std::string name(const char* sentence) { \
                     if ((ARR)[i - 1].word == def_from.addition) { \
                         for (int t_i = 0; t_i < (INFO_ARG)->def_to_count && !found; ++t_i) { \
                             Definiteness def_to = (INFO_ARG)->def_to[t_i]; \
-                              std::string affix = def_to.addition;\
+                              String affix = def_to.addition;\
                     if(def_to.vowel_harmony != nullptr){\
                                             const HarmonyTable& v_h = *(def_to.vowel_harmony); \
                                             affix = checkVowelHarmony((ARR)[i].translation, affix, v_h);\
@@ -1771,7 +1884,7 @@ std::string name(const char* sentence) { \
             } \
         } \
    if ((ARR).size() >= 2) { \
-            std::vector<Word> replacement; \
+            Vector<Word> replacement; \
             AdjectiveOrder ao_from = (INFO_ARG)->ao_from;   \
             AdjectiveOrder ao_to = (INFO_ARG)->ao_to;       \
             for (size_t i = 0; i + 1 < (ARR).size(); ++i) { \
@@ -1801,7 +1914,7 @@ if ((ARR).size() >= 2) { \
     } \
     if (has_agreement_morph) { \
         /* create a mask for each word to track what morphologies have been applied */ \
-        std::vector<int> word_applied_mask((ARR).size(), 0); \
+        Vector<int> word_applied_mask((ARR).size(), 0); \
         /* first pass: find the noun and get its flags AND applied morphologies */ \
         for (size_t i = 0; i < (ARR).size(); ++i) { \
             /* if we find a noun */ \
@@ -1813,7 +1926,7 @@ if ((ARR).size() >= 2) { \
                 /* get all flags from this noun */ \
                 uint16_t noun_flags = (ARR)[i].flags; \
                 /* collect morphologies to apply from BOTH sources */ \
-                std::vector<const MorphVariation*> morphs_to_apply; \
+                Vector<const MorphVariation*> morphs_to_apply; \
                 /* source 1: from noun's flags (gender, etc.) */ \
                 for (const auto& var : MORPH_TO_OBJ.variations) { \
                     if (var.agreement == AGREEMENT && (noun_flags & var.flag)) { \
@@ -1874,7 +1987,7 @@ if ((ARR).size() >= 2) { \
                     for (size_t j = i + 1; j < (ARR).size(); ++j) { \
                         /* if we find an adjective or article before this noun */ \
                         if ((ARR)[j].type == ADJECTIVE || (ARR)[j].type == ARTICLE || (ARR)[j].type == PRONOUN) { \
-                            std::string translation = (ARR)[j].translation; \
+                            String translation = (ARR)[j].translation; \
                             for (const auto& morph : morphs_to_apply) { \
                                 /* only apply if this morphology type hasn't been applied to this word yet */ \
                                 if (!(word_applied_mask[j] & (1 << morph->morphology))) { \
@@ -1889,7 +2002,7 @@ if ((ARR).size() >= 2) { \
                     for (int j = i - 1; j >= 0; --j) { \
                         /* if we find an adjective or article before this noun */ \
                         if ((ARR)[j].type == ADJECTIVE || (ARR)[j].type == ARTICLE || (ARR)[j].type == PRONOUN) { \
-                            std::string translation = (ARR)[j].translation; \
+                            String translation = (ARR)[j].translation; \
                             for (const auto& morph : morphs_to_apply) { \
                                 /* only apply if this morphology type hasn't been applied to this word yet */ \
                                 if (!(word_applied_mask[j] & (1 << morph->morphology))) { \
@@ -1957,7 +2070,7 @@ if ((ARR).size() >= 2) { \
                     modified_possessed.flags |= gc_from.flags; \
                     \
                     /* Build replacement words according to target order */ \
-                    std::vector<Word> replacement; \
+                    Vector<Word> replacement; \
                     if (gc_to.order == POSSESSED_FIRST) { \
                         if (gc_to.type == SUFFIX) { \
                             /* Attach suffix directly to the possessed word */ \
@@ -2081,7 +2194,7 @@ enum ClauseOrders {
 
 
 
-inline WordType typeFromString(const std::string& s) {
+inline WordType typeFromString(const String& s) {
     if (s == "NOUN") return NOUN;
     if (s == "ADJECTIVE") return ADJECTIVE;
     if (s == "VERB") return VERB;
@@ -2143,19 +2256,19 @@ enum SuffixFlags: uint8_t {
 
 typedef struct {
     
-    std::string root;
-    std::vector<std::string> suffixes;
+    String root;
+    Vector<String> suffixes;
 } SuffixRule;
 
 typedef struct {
-  std::string original;
-  std::string replacement;
+  String original;
+  String replacement;
 } Normalization;
 
 
 typedef struct {
-   std::string word;
-   std::string translation;
+   String word;
+   String translation;
    int type;
    uint16_t orig_flags; // flags for original word, just remembered that in languages that have same linguistic features but with variation (e.g gender in portuguese and russian) we need to know the flags for both the original word and the translation to make decisions.
    uint16_t flags;
@@ -2180,9 +2293,9 @@ struct Homonym {
 };
 
 template <size_t N>
-std::vector<Word> MEDIATE_HOMONYMS(
-    std::vector<Word> arr,
-    const std::vector<std::string>& words,
+Vector<Word> MEDIATE_HOMONYMS(
+    Vector<Word> arr,
+    const Vector<String>& words,
     Homonym (&homonyms)[N]
 ) {
     for (size_t i = 0; i < arr.size(); ++i) {
@@ -2197,15 +2310,15 @@ std::vector<Word> MEDIATE_HOMONYMS(
                     static_cast<int>(i) + 2
                 );
 
-                std::vector<std::string> context;
+                Vector<String> context;
                 for (int j = start; j <= end; ++j) {
                     context.push_back(arr[j].translation);
                 }
 
                 size_t contextIndex = static_cast<size_t>(i - start);
 
-                std::vector<std::string> this_context = context;
-                std::vector<int> word_types(context.size(), 0);
+                Vector<String> this_context = context;
+                Vector<int> word_types(context.size(), 0);
 
                 this_context[contextIndex] = arr[i].word;
                 word_types[contextIndex]   = arr[i].type;
@@ -2224,7 +2337,7 @@ std::vector<Word> MEDIATE_HOMONYMS(
                     continue;
                 }
 
-                std::string resolved_word =
+                String resolved_word =
                     semantics(this_context,
                               word_types,
                               contextIndex,
@@ -2269,8 +2382,8 @@ struct ParticleRule {
     int particle_type;                
 };
 
-inline std::vector<Word> INSERT_PARTICLE(
-    std::vector<Word> arr,
+inline Vector<Word> INSERT_PARTICLE(
+    Vector<Word> arr,
     int type_before,
     int type_after,
     const char* particle_word,
@@ -2280,7 +2393,7 @@ inline std::vector<Word> INSERT_PARTICLE(
     const char* particle_translation = nullptr,
     int particle_type = -1
 ) {
-    std::vector<Word> result;
+    Vector<Word> result;
     
     for (size_t i = 0; i < arr.size(); ++i) {
         if (i + 1 < arr.size() && 
@@ -2325,9 +2438,9 @@ inline std::vector<Word> INSERT_PARTICLE(
     return result;
 }
 
-inline std::vector<Word> INSERT_PARTICLES(
-    std::vector<Word> arr, 
-    const std::vector<ParticleRule>& rules
+inline Vector<Word> INSERT_PARTICLES(
+    Vector<Word> arr, 
+    const Vector<ParticleRule>& rules
 ) {
     
     for (const auto& rule : rules) {
@@ -2349,11 +2462,11 @@ inline std::vector<Word> INSERT_PARTICLES(
 }
 
 
-inline std::vector<Word> POST_CONJUGATION(
-    std::vector<Word> arr
+inline Vector<Word> POST_CONJUGATION(
+    Vector<Word> arr
    
 ) {
-    std::vector<Word> result;
+    Vector<Word> result;
     
     for (size_t i = 0; i < arr.size(); ++i) {
         if (i + 1 < arr.size()) {
@@ -2434,17 +2547,17 @@ inline const char* lookup_test(const Entry* dict, size_t count, const char* word
 
 
 template <size_t N>
-inline const char* auto_correct(const Entry(&dict)[N] , std::string word) {
-   std::string result = word;
-   std::string word_temp = word;
+inline const char* auto_correct(const Entry(&dict)[N] , String word) {
+   String result = word;
+   String word_temp = word;
    
    //try different letters at every position (femilia -> familia)
-   std::string possible_letters = "abcdefghjijklmnopqrstuvwxyz";
+   String possible_letters = "abcdefghjijklmnopqrstuvwxyz";
    for(size_t i = 0; i < word.length(); i++){
     for(size_t j = 0; j < possible_letters.length(); j++){
       word_temp.replace(i, 1, 1, possible_letters[j]);
       const char* lookup_ = lookup(dict, word_temp.c_str());
-      if(lookup_ && std::string(lookup_).length() > 2) {
+      if(lookup_ && String(lookup_).length() > 2) {
         return lookup_;
     }else{
         //reset after failed 
@@ -2458,7 +2571,7 @@ inline const char* auto_correct(const Entry(&dict)[N] , std::string word) {
     for(size_t j = 0; j < possible_letters.length(); j++){
       word_temp.insert(word_temp.begin() + i, possible_letters[j]);
       const char* lookup_ = lookup(dict, word_temp.c_str());
-      if(lookup_ && std::string(lookup_).length() > 2) {
+      if(lookup_ && String(lookup_).length() > 2) {
         return lookup_;
     }else{
         //reset after failed 
@@ -2471,7 +2584,7 @@ inline const char* auto_correct(const Entry(&dict)[N] , std::string word) {
         for(size_t i = 0; i < word.length(); i++){
              word_temp.erase(i, 1);
                 const char* lookup_ = lookup(dict, word_temp.c_str());
-            if(lookup_ && std::string(lookup_).length() > 2) {
+            if(lookup_ && String(lookup_).length() > 2) {
                         return lookup_;
             }else{
                         //reset after failed 
@@ -2558,14 +2671,14 @@ inline uint8_t lookupSuffFlags(const Suffix (&dict)[N], const char* word) {
 
 
 //invert a pair (casa azul -> azul casa)
-inline void invert(std::vector<Word>& output, const Word& first, const Word& second, const char*) {
+inline void invert(Vector<Word>& output, const Word& first, const Word& second, const char*) {
     
     if (!output.empty()) output.pop_back(); 
     output.push_back(first);
     output.push_back(second);
 }
 //
-inline void replace_first(std::vector<Word>& output, const Word& replacement, const Word& second, const char*) {
+inline void replace_first(Vector<Word>& output, const Word& replacement, const Word& second, const char*) {
     if (!output.empty()) output.pop_back();
 
     output.push_back(replacement);
@@ -2573,7 +2686,7 @@ inline void replace_first(std::vector<Word>& output, const Word& replacement, co
 }
 
 // inject a word in the middle of two words (orange juice -> suco de laranja)
-inline void sandwich(std::vector<Word>& output, const Word& first, const Word& second, const char* word) {
+inline void sandwich(Vector<Word>& output, const Word& first, const Word& second, const char* word) {
     if (!output.empty()) output.pop_back(); 
     output.push_back(first);
     output.push_back(Word{word, word, 0});
@@ -2581,30 +2694,30 @@ inline void sandwich(std::vector<Word>& output, const Word& first, const Word& s
 }
 
 // replace a word in the middle of two words (orange juice -> suco de laranja)
-inline void sandwich_replace(std::vector<Word>& output,const Word& middle, const Word& second, const char*) {
+inline void sandwich_replace(Vector<Word>& output,const Word& middle, const Word& second, const char*) {
     if (!output.empty()) output.pop_back(); 
     output.push_back(middle);
     output.push_back(second);
 }
 
 //remove middle word
-inline void remove_middle(std::vector<Word>& output, const Word& first, const Word& middle, const Word& last) {
+inline void remove_middle(Vector<Word>& output, const Word& first, const Word& middle, const Word& last) {
     if (!output.empty()) output.pop_back();
     output.push_back(first);
     output.push_back(last);
 }
-inline void remove_first(std::vector<Word>& output, const Word& first, const Word& second, const char*) {
+inline void remove_first(Vector<Word>& output, const Word& first, const Word& second, const char*) {
   if (!output.empty()) {output.pop_back(); }
     output.push_back(first);
 }
 
-inline void remove_current(std::vector<Word>& output) {
+inline void remove_current(Vector<Word>& output) {
   if (output.size() > 1) {
         output.erase(output.end() - 1, output.end()); 
     }           
 }
 
-inline void remove_pair(std::vector<Word>& output) {
+inline void remove_pair(Vector<Word>& output) {
     if (output.size() >= 2) {
         output.erase(output.end() - 2, output.end()); 
     }
@@ -2612,18 +2725,18 @@ inline void remove_pair(std::vector<Word>& output) {
 
 // all the lookups
 
-using Reorder = std::vector<Word>(*)(const std::vector<Word>&);
-using NounLookup = Word(*)(const std::string&);
+using Reorder = Vector<Word>(*)(const Vector<Word>&);
+using NounLookup = Word(*)(const String&);
 
 //ngram groups
-inline std::string unigramLookup(const std::vector<std::string>& array_of_words,
-                                 const std::vector<int>& ignore_flags, Reorder reorder_helpers = nullptr, NounLookup nounLookup = nullptr, bool non_spaced = false){
+inline String unigramLookup(const Vector<String>& array_of_words,
+                                 const Vector<int>& ignore_flags, Reorder reorder_helpers = nullptr, NounLookup nounLookup = nullptr, bool non_spaced = false){
 
-  std::vector<Word> sentence_arr;
-  std::vector<Word> word_arr;
+  Vector<Word> sentence_arr;
+  Vector<Word> word_arr;
 
   int match_type;
-  std::string sentence;
+  String sentence;
   for(size_t i = 0; i < array_of_words.size(); ++i){
     
 Word match = nounLookup(array_of_words[i]);
@@ -2632,7 +2745,7 @@ Word match = nounLookup(array_of_words[i]);
     case 0:{
     match_type = match.type;
     if(match.type == -1) match_type = 0;
-     std::string token = array_of_words[i];
+     String token = array_of_words[i];
     bool isPunct = (token.size() == 1 && (token[0] == '.' || token[0] == '!' || 
                     token[0] == '?' || token[0] == ',' || token[0] == ':' ||
                     token[0] == ';' || token[0] == '(' || token[0] == ')'));
@@ -2658,7 +2771,7 @@ if(word_arr.size() > 0) {
 }
   
  for (size_t i = 0; i < sentence_arr.size(); ++i) {
-    const std::string& token = sentence_arr.at(i).translation;
+    const String& token = sentence_arr.at(i).translation;
 
     char firstChar = token.empty() ? '\0' : token[0];
     bool isPunctuation = (firstChar == '?' || firstChar == '!' || 
@@ -2675,16 +2788,19 @@ if(word_arr.size() > 0) {
 }
 
 template <size_t N>
-inline std::string bigramLookup(const Entry (&fixed_ngrams)[N],
-                                const std::vector<std::string>& words,
-                                std::vector<int>& ignore_flags, Reorder reorder_helpers = nullptr, NounLookup nounLookup = nullptr, bool non_spaced = false) {
-    std::vector<std::string> mended_array_of_words;
-    std::vector<int> new_ignore_flags;
+inline String bigramLookup(const Entry (&fixed_ngrams)[N],
+                                const Vector<String>& words,
+                                Vector<int>& ignore_flags, Reorder reorder_helpers = nullptr, NounLookup nounLookup = nullptr, bool non_spaced = false) {
+    Vector<String> mended_array_of_words;
+    Vector<int> new_ignore_flags;
 
     size_t i = 0;
     while (i < words.size()) {
         if (i + 1 < words.size() && ignore_flags[i] == 0 && ignore_flags[i + 1] == 0) {
-            std::string bigram = words[i] + "_" + words[i + 1];
+            String bigram;
+            bigram += words[i];
+            bigram += "_";
+            bigram += words[i + 1];
             const char* bigram_translation = lookup(fixed_ngrams, bigram.c_str());
             
             if (bigram_translation) {
@@ -2705,15 +2821,20 @@ inline std::string bigramLookup(const Entry (&fixed_ngrams)[N],
 
 
 template <size_t N>
-inline std::string trigramLookup(const Entry (&fixed_ngrams)[N],
-                                 const std::vector<std::string>& words, Reorder reorder_helpers = nullptr, NounLookup nounLookup = nullptr, bool non_spaced = false) { 
-                                    std::vector<std::string> mended;
-                                    std::vector<int> ignore_flags(words.size(), 0);
+inline String trigramLookup(const Entry (&fixed_ngrams)[N],
+                                 const Vector<String>& words, Reorder reorder_helpers = nullptr, NounLookup nounLookup = nullptr, bool non_spaced = false) { 
+                                    Vector<String> mended;
+                                    Vector<int> ignore_flags(words.size(), 0);
 
     size_t i = 0;
     while (i < words.size()) {
         if (i + 2 < words.size()) {
-            std::string trigram = words[i] + "_" + words[i + 1] + "_" + words[i + 2];
+            String trigram;
+            trigram += words[i];
+            trigram += "_";
+            trigram += words[i + 1];
+            trigram += "_";
+            trigram += words[i + 2];
             
             const char* trigram_translation = lookup(fixed_ngrams, trigram.c_str());
             
@@ -2748,9 +2869,9 @@ inline void to_lower(char *s) {
 }
 
 
-inline std::vector<std::string> tokenize(const std::string &text) {
-      std::vector<std::string> tokens;
-      std::string current;
+inline Vector<String> tokenize(const String &text) {
+      Vector<String> tokens;
+      String current;
       size_t i = 0;
 
       while (i < text.size()) {
@@ -2765,7 +2886,7 @@ inline std::vector<std::string> tokenize(const std::string &text) {
                       current.clear();
                   }
                   if (!std::isspace(c))
-                      tokens.push_back(std::string(1, c));
+                      tokens.push_back(String(1, c));
               }
               ++i;
           } else {
@@ -2775,7 +2896,7 @@ inline std::vector<std::string> tokenize(const std::string &text) {
               else if ((c & 0xF8) == 0xF0) len = 4;
               else len = 1;
 
-              std::string utf8char = text.substr(i, len);
+              String utf8char = text.substr(i, len);
               current += utf8char;
               i += len;
           }
@@ -2786,8 +2907,8 @@ inline std::vector<std::string> tokenize(const std::string &text) {
       return tokens;
   }
 
-  inline std::vector<std::string> tokenize_cjk(const std::string &text) {
-    std::vector<std::string> tokens;
+  inline Vector<String> tokenize_cjk(const String &text) {
+    Vector<String> tokens;
     size_t i = 0;
 
     while (i < text.size()) {
@@ -2796,7 +2917,7 @@ inline std::vector<std::string> tokenize(const std::string &text) {
         if ((c & 0x80) == 0) {
             // ASCII alphanumeric word
             if (std::isalnum(c)) {
-                std::string current;
+                String current;
                 while (i < text.size() && (text[i] & 0x80) == 0 && std::isalnum(text[i])) {
                     current += text[i];
                     ++i;
@@ -2805,7 +2926,7 @@ inline std::vector<std::string> tokenize(const std::string &text) {
             } else {
                 // ASCII punctuation or space
                 if (!std::isspace(c))
-                    tokens.push_back(std::string(1, c));
+                    tokens.push_back(String(1, c));
                 ++i;
             }
         } else {
@@ -2825,7 +2946,7 @@ inline std::vector<std::string> tokenize(const std::string &text) {
 }
 
 
-inline bool isPunctuation(const std::string &token) {
+inline bool isPunctuation(const String &token) {
     if (token.empty()) return false;
 
     const char punct[] = ".,?!-/:;()[]{}\"'";
@@ -2843,7 +2964,7 @@ inline bool isPunctuation(const std::string &token) {
 }
 
 
-inline uint32_t next_utf8_char(const std::string& s, size_t& i) {
+inline uint32_t next_utf8_char(const String& s, size_t& i) {
     unsigned char c = s[i];
     uint32_t cp = 0;
     size_t extra = 0;
@@ -2878,7 +2999,7 @@ inline uint32_t next_utf8_char(const std::string& s, size_t& i) {
 
 struct Action {
     const char* key;
-    void (*fp)(std::vector<Word>&, const Word&, const Word&, const char*);  
+    void (*fp)(Vector<Word>&, const Word&, const Word&, const char*);  
 };
 
 
@@ -2890,9 +3011,9 @@ inline Action actions[] = {
 };
 
 
-inline std::vector<std::string> parser(const std::string& s) {
-    std::vector<std::string> out;
-    std::string current;
+inline Vector<String> parser(const String& s) {
+    Vector<String> out;
+    String current;
 
     for (char c : s) {
         if (c == ' ') {
@@ -2913,7 +3034,7 @@ inline std::vector<std::string> parser(const std::string& s) {
 }
 
 inline auto lookupFunction(const char* query)
-    -> void (*)(std::vector<Word>&, const Word&, const Word&, const char*)  
+    -> void (*)(Vector<Word>&, const Word&, const Word&, const char*)  
 {
     int actionCount = sizeof(actions) / sizeof(actions[0]);
 
@@ -2940,23 +3061,23 @@ inline auto lookupFunction(const char* query)
 
 
 inline bool rule(
-       const std::string& rule,
-    const std::vector<Word>& sentence_arr,
-    std::vector<Word>& reordered_arr,
+       const String& rule,
+    const Vector<Word>& sentence_arr,
+    Vector<Word>& reordered_arr,
     int i,
     const char* action_arg = nullptr 
 ) {
-    std::vector<std::string> t = parser(rule);
+    Vector<String> t = parser(rule);
     if (t.size() < 6) return false;
     if (t[0] != "IF") return false;
 
-    std::string A_str = t[1];
+    String A_str = t[1];
     WordType A = typeFromString(A_str);
 
     if (t[2] != "THEN") return false;
 
-    struct Matcher { bool isType; WordType type; std::string literal; };
-    std::vector<Matcher> Bs;
+    struct Matcher { bool isType; WordType type; String literal; };
+    Vector<Matcher> Bs;
 
     int idx = 3;
     {
@@ -2978,7 +3099,7 @@ inline bool rule(
         idx++;
     }
 
-    std::vector<std::string> actions;
+    Vector<String> actions;
     while (idx < (int)t.size()) {
         if (t[idx] == "DO") {
             idx++;
@@ -2994,7 +3115,7 @@ inline bool rule(
     WordType type_prev = static_cast<WordType>(sentence_arr[i - 1].type);
     WordType type_curr = static_cast<WordType>(sentence_arr[i].type);
 
-    std::string word_curr = sentence_arr[i].word;
+    String word_curr = sentence_arr[i].word;
 
     if (type_prev != A) return false;
 
@@ -3055,25 +3176,26 @@ Info default_info = {
 
 
 inline unsigned int nouns_length = 0;
-inline Entry default_nouns[1000];
+inline Entry default_nouns[50];
 
 inline unsigned int verbs_length = 0;
-inline Verb default_verbs[1000];
+inline Verb default_verbs[50];
 
-inline std::vector<std::string> temp_verb_endings;
-inline std::string temp_required_ending;
-inline std::string temp_affix;
+inline Vector<String> temp_verb_endings;
+inline String temp_required_ending;
+inline String temp_affix;
 inline uint8_t temp_type = 0;
 
 // whenever parsing the binary, use push_back instead of [i] = value to add new entries.
-VERB_ENDINGS(default_endings, {
-   {{""}, NONE, INFINITIVE}
-});
+// unless etl?
 
-VERB_CONJUGATIONS(default_conjugations, 
-{
-   {INFINITIVE, SUFFIX, "", "る"}
-});
+inline VerbRuleDictionary default_endings = {
+    VerbRule{{""}, NONE, INFINITIVE}
+};
+
+inline VerbConjugationDictionary default_conjugations = {
+    {INFINITIVE, SUFFIX, "", "る"}
+};
 
 
 MORPH_DEF(default_morph_from,
@@ -3088,14 +3210,14 @@ MORPH_DEF(default_morph_to,
 
 
 inline unsigned int adjective_length = 0;
-inline Entry default_adjectives[1000];
+inline Entry default_adjectives[50];
 
 inline unsigned int pronoun_length = 0;
 inline Entry default_pronouns[20];
 
 
 inline unsigned int adverb_length = 0;
-inline Entry default_adverbs[1000];
+inline Entry default_adverbs[50];
 
 inline char buffer[250];
 
@@ -3103,20 +3225,20 @@ inline char buffer[250];
 
 
 struct NormalizationRule {
-     std::string from;
-     std::string to;
+     String from;
+     String to;
      int type;
 };
 inline unsigned int target_flags_length = 0;
 inline unsigned int normalizationRuleLength = 0;
-inline NormalizationRule default_normalizationRules[50];
+inline NormalizationRule default_normalizationRules[7];
 
-inline std::string default_normalize(
-    std::string word,
+inline String default_normalize(
+    String word,
     NormalizationRule* rules,
     unsigned int rule_count
 ) {
-    std::string normalized_ = word;
+    String normalized_ = word;
      for (unsigned int i = 0; i < rule_count; ++i)
 {
     NORMALIZE(
@@ -3129,9 +3251,9 @@ inline std::string default_normalize(
 }
 
 
-static std::vector<Word> default_reorderHelpers(const std::vector<Word>& copy){
-    std::vector<Word> sentence_arr = copy;
-    std::vector<Word> reordered_arr;
+static Vector<Word> default_reorderHelpers(const Vector<Word>& copy){
+    Vector<Word> sentence_arr = copy;
+    Vector<Word> reordered_arr;
 
     for (size_t i = 0; i < sentence_arr.size(); ++i) {
      INIT_REORDER()
@@ -3141,7 +3263,7 @@ static std::vector<Word> default_reorderHelpers(const std::vector<Word>& copy){
     }
 CLEANUP(reordered_arr)
 
-std::vector<Word> final_arr;
+Vector<Word> final_arr;
 for (size_t i = 0; i < reordered_arr.size(); ++i) {
     final_arr.push_back(reordered_arr[i]);
 }
@@ -3149,7 +3271,7 @@ for (size_t i = 0; i < reordered_arr.size(); ++i) {
 }
 
 
-static Word default_verb_lookup(const std::string& word) {
+static Word default_verb_lookup(const String& word) {
     if (verbs_length == 0 || default_endings.empty() || default_conjugations.empty())
         return Word{word, word, -1};
 
@@ -3170,11 +3292,11 @@ static Word default_verb_lookup(const std::string& word) {
             }
             if (!ends_with) continue;
 
-            std::string root = word.substr(0, word.size() - ending.size());
+            String root = word.substr(0, word.size() - ending.size());
 
             Verb v = find_verb_in_array(default_verbs, verbs_length, root.c_str());
             if (v.translation && *v.translation) {
-                std::string translation = v.translation;
+                String translation = v.translation;
 
                 for (const auto& conj : default_conjugations) {
                     if (conj.form != group.form) continue;
@@ -3191,11 +3313,16 @@ static Word default_verb_lookup(const std::string& word) {
                     }
 
                     if (condition_met) {
-                        std::string result;
-                        if (conj.type == PREFIX)
-                            result = conj.affix + translation;
+                        String result;
+                        if (conj.type == PREFIX){
+                            String result;
+                                result += conj.affix;
+                                result += translation;
+                       }
                         else // SUFFIX
-                            result = translation + conj.affix;
+                           String result;
+                            result += translation;
+                            result += conj.affix;
                         return Word{word, result, VERB};
                     }
                 }
@@ -3206,21 +3333,21 @@ static Word default_verb_lookup(const std::string& word) {
 }
 
 
-static Word default_nounLookup(const std::string& word) {
+static Word default_nounLookup(const String& word) {
     if (const char* result = lookup_test(default_nouns, nouns_length,word.c_str())) { 
-        std::string translation = result; 
+        String translation = result; 
         int word_type = NOUN; 
         return { word, default_normalize(translation, default_normalizationRules,normalizationRuleLength), word_type }; 
     }else if(const char* result = lookup_test(default_adjectives, adjective_length,word.c_str())){
-            std::string translation = result; 
+            String translation = result; 
             int word_type = ADJECTIVE; 
             return { word, default_normalize(translation, default_normalizationRules,normalizationRuleLength), word_type }; 
     }else if(const char* result = lookup_test(default_pronouns, pronoun_length,word.c_str())){
-            std::string translation = result; 
+            String translation = result; 
             int word_type = ADJECTIVE; 
             return { word, default_normalize(translation, default_normalizationRules,normalizationRuleLength), word_type }; 
     }else if(const char* result = lookup_test(default_adverbs, adverb_length,word.c_str())){
-            std::string translation = result; 
+            String translation = result; 
             int word_type = ADVERB; 
             return { word, default_normalize(translation, default_normalizationRules,normalizationRuleLength), word_type }; 
     }
@@ -3233,15 +3360,15 @@ static Word default_nounLookup(const std::string& word) {
 
 // mapping out how i'm gonna receive the binary file buffers to dinamically define the rules 
 // it works!!
-inline std::string load_from_bin(const uint8_t* file, size_t size)
+inline String load_from_bin(const uint8_t* file, size_t size)
 {
     const uint8_t* ptr = reinterpret_cast<const uint8_t*>(file);
     const uint8_t* end = ptr + size;
     int current_area = 0;
     const char* s = nullptr;
     const char* r = nullptr;
-    std::string from = "";
-    std::string to = "";
+    String from = "";
+    String to = "";
     default_endings.clear();
     default_conjugations.clear();
     nouns_length = 0;
@@ -3286,7 +3413,7 @@ case 0xF0:
     {
         word_length = *ptr++;
         s = reinterpret_cast<const char*>(ptr);
-        from = std::string(s);
+        from = String(s);
         ptr += word_length + 1;
     }
     else if (current_area == 1) // dictionary entry
@@ -3307,10 +3434,10 @@ case 0xF0:
     {
         uint8_t ending_count = *ptr++;
         if (current_area == 3) {
-            std::vector<std::string> endings;
+            Vector<String> endings;
             for (int i = 0; i < ending_count; i++) {
                 s = reinterpret_cast<const char*>(ptr);
-                std::string ending = std::string(s);
+                String ending = String(s);
                 endings.push_back(ending);
                 ptr += strlen(s) + 1;
             }
@@ -3318,10 +3445,10 @@ case 0xF0:
         }
         else { // current_area == 4
             s = reinterpret_cast<const char*>(ptr);
-            temp_required_ending = std::string(s);
+            temp_required_ending = String(s);
             ptr += strlen(s) + 1;
             s = reinterpret_cast<const char*>(ptr);
-            temp_affix = std::string(s);
+            temp_affix = String(s);
             ptr += strlen(s) + 1;
         }
     }
@@ -3342,7 +3469,7 @@ case 0xF1:
         uint8_t translation_length = *ptr++;
         r = reinterpret_cast<const char*>(ptr);
         ptr += translation_length + 1;
-        to = std::string(r);
+        to = String(r);
     }
     else if (current_area == 1)
     {
@@ -3404,7 +3531,7 @@ case 0xF2:
         // Create normalization rule
         if (s && r) {
             default_normalizationRules[normalizationRuleLength++] = 
-                NormalizationRule{std::string(s), std::string(r), type};
+                NormalizationRule{String(s), String(r), type};
         }
         // Reset pointers to avoid reuse
         s = nullptr;
@@ -3419,7 +3546,7 @@ case 0xF2:
         uint8_t translation_length = *ptr++;
         r = reinterpret_cast<const char*>(ptr);
         ptr += translation_length + 1;
-        to = std::string(r);
+        to = String(r);
     }
     else if (current_area == 1)
     {
@@ -3489,7 +3616,7 @@ case 0xF2:
         uint8_t translation_length = *ptr++;
         r = reinterpret_cast<const char*>(ptr);
         ptr += translation_length + 1;
-        to = std::string(r);
+        to = String(r);
     }
     else if (current_area == 1)
     {
@@ -3550,18 +3677,18 @@ default:
 
         }
     }
-std::cout << "Nouns: " << nouns_length << "\n";
-std::cout << "Adjectives: " << adjective_length << "\n";
-std::cout << "Pronouns: " << pronoun_length << "\n";
-std::cout << "Multi-word entries: " << ngrams_length << "\n";
-std::cout << "Verbs: " << verbs_length << "\n";
-std::cout << "Verb endings: " << default_endings.size() << "\n";
-std::cout << "Verb conjugations: " << default_conjugations.size() << "\n";
-std::cout << "Normalization rules: " << normalizationRuleLength << "\n";
-std::cout << "Multibyte? " << (default_multibyte == 0 ? "No" : "Yes") << "\n";
-return std::string("Loaded translator: " + from + " > " + to + "\n");
+// std::cout << "Nouns: " << nouns_length << "\n";
+// std::cout << "Adjectives: " << adjective_length << "\n";
+// std::cout << "Pronouns: " << pronoun_length << "\n";
+// std::cout << "Multi-word entries: " << ngrams_length << "\n";
+// std::cout << "Verbs: " << verbs_length << "\n";
+// std::cout << "Verb endings: " << default_endings.size() << "\n";
+// std::cout << "Verb conjugations: " << default_conjugations.size() << "\n";
+// std::cout << "Normalization rules: " << normalizationRuleLength << "\n";
+// std::cout << "Multibyte? " << (default_multibyte == 0 ? "No" : "Yes") << "\n";
+return String("Loaded translator: "/**+ from + " > " + to + "\n" */ );
 }
-inline std::string translate_from_bin(const char* sentence,
+inline String translate_from_bin(const char* sentence,
                                       int script = 0,
                                       bool auto_correct = false)
 {
@@ -3583,19 +3710,19 @@ inline std::string translate_from_bin(const char* sentence,
     }
 
   to_lower(buffer);
-  std::vector<std::string> arr; 
+  Vector<String> arr; 
  if(default_multibyte == true) { 
-    arr = tokenize_cjk(std::string(buffer));
-    std::vector<std::string> verb_combined; 
+    arr = tokenize_cjk(String(buffer));
+    Vector<String> verb_combined; 
     if (!(verbs_length < 1) && !default_endings.empty()) {
         DEFAULT_COMBINE_VERB_TOKENS(arr, verb_combined, default_verbs, default_endings, 3, 2); 
-        std::vector<std::string> final_combined; 
+        Vector<String> final_combined; 
         size_t i = 0; 
         while (i < verb_combined.size()) { 
             bool found = false; 
             for (size_t len = 4; len >= 1; --len) { 
                 if (i + len > verb_combined.size()) continue; 
-                std::string cand; 
+                String cand; 
                 for (size_t k = 0; k < len; ++k) cand += verb_combined[i + k];
                if (lookup_test(default_nouns, nouns_length, cand.c_str()) ||
                     lookup_test(default_adjectives, adjective_length, cand.c_str()) ||
@@ -3619,14 +3746,14 @@ inline std::string translate_from_bin(const char* sentence,
         arr = verb_combined;
     }
 } else { 
-    arr = tokenize(std::string(buffer)); 
+    arr = tokenize(String(buffer)); 
 } 
 
     if (arr.empty()) {
         return "";
     }
 
-    std::string translated =
+    String translated =
         trigramLookup(default_fixed_ngrams,
                       arr,
                       default_reorderHelpers,
@@ -3638,19 +3765,19 @@ inline std::string translate_from_bin(const char* sentence,
 extern Homonym homonyms[];
 extern const size_t homonymCount;
 // this can be global, since specific cases are defined on the structs and not on the function itself
-inline std::string semantics(const std::vector<std::string>& sentence,
-                             const std::vector<int>& word_types,
+inline String semantics(const Vector<String>& sentence,
+                             const Vector<int>& word_types,
                              size_t index,
                              Homonym* homonyms,
                              size_t numHomonyms)
 {
     if (index >= sentence.size()) return "";
 
-    const std::string& w = sentence[index];
+    const String& w = sentence[index];
     for (size_t h = 0; h < numHomonyms; ++h) {
         Homonym& hom = homonyms[h];
         if (!hom.word) continue;
-        if (std::string(hom.word) != w) continue;
+        if (String(hom.word) != w) continue;
 
         // Reset outcome scores
         for (size_t j = 0; j < hom.num_outcomes; ++j) {
@@ -3665,7 +3792,7 @@ inline std::string semantics(const std::vector<std::string>& sentence,
             int nearbyIdx = static_cast<int>(index) + o;
             if (nearbyIdx < 0 || nearbyIdx >= static_cast<int>(sentence.size())) continue;
 
-            const std::string& nearby = sentence[nearbyIdx];
+            const String& nearby = sentence[nearbyIdx];
             if (nearby.empty()) continue;
 
             size_t currentOutcome = 0;
@@ -3673,7 +3800,7 @@ inline std::string semantics(const std::vector<std::string>& sentence,
 
             for (size_t tidx = 0; tidx < hom.num_tokens && currentOutcome < hom.num_outcomes; ++tidx) {
                 if (!hom.tokens[tidx]) continue;
-                std::string token = hom.tokens[tidx];
+                String token = hom.tokens[tidx];
      
                 if (token == "$") { 
                     ++currentOutcome; 
@@ -3704,13 +3831,13 @@ inline std::string semantics(const std::vector<std::string>& sentence,
 
         // Pick best outcome
         float bestScore = -1.0f;
-        std::string bestWord = w;
+        String bestWord = w;
         for (size_t j = 0; j < hom.num_outcomes; ++j) {
             if (hom.outcomes && j < hom.num_outcomes) {
                 Outcome& o = hom.outcomes[j];
                 if (o.score > bestScore) {
                     bestScore = o.score;
-                    bestWord = o.word ? std::string(o.word) : w;
+                    bestWord = o.word ? String(o.word) : w;
                 }
             }
         }
