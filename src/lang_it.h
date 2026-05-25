@@ -7,8 +7,13 @@
 #include <vector>
 #include <cstring>
 #include <cstddef>
-
-
+// if you use ETL, set the fixed size of vectors, strings and structure arrays
+#define MAX_STRING_LENGTH 150
+#define MAX_VECTOR_LENGTH 14
+#define MAX_VERB_ENDINGS 12
+#define MAX_VERB_CONJUGATIONS 5
+#define MAX_ENTRIES 30
+#define MAX_NORMALIZATION_RULES 10
 
 
 #ifdef ETL_BUILD
@@ -16,24 +21,29 @@
     #include "etl/vector.h"
     #include "etl/to_arithmetic.h"
     
-    using String = etl::string<12>;
+    using String = etl::string<MAX_STRING_LENGTH>;
+    using WordString = etl::string<15>;
+    using AtomString = etl::string<7>;
     
-    template<typename T, size_t N = 20>
+    template<typename T, size_t N = MAX_VECTOR_LENGTH>
     using Vector = etl::vector<T, N>;
+
+    template<typename T, size_t N>
+    using SmallVector = etl::vector<T, N>;
 
 
     typedef struct {
         int scope;
         int trigger;
-    Vector<String> vowels;
-    String insert_vowel;
+        Vector<AtomString> vowels;
+        AtomString insert_vowel;
     } Harmony;
 
     using HarmonyTable = Vector<Harmony>; 
 
     typedef struct 
         {
-            Vector<String> endings;
+            Vector<AtomString> endings;
             int type;
             int form;
         } VerbRule;
@@ -42,8 +52,8 @@
         {
             int form;     
             int type;       
-            String required_ending;
-            String affix;
+            AtomString required_ending;
+            AtomString affix;
             uint16_t flags;
             HarmonyTable* vowel_harmony;
         } VerbConjugation;
@@ -51,9 +61,24 @@
         
 
 
-    using VerbRuleDictionary = etl::vector<VerbRule, 5>;
-    using VerbConjugationDictionary = etl::vector<VerbConjugation, 5>;
+    using VerbRuleDictionary = etl::vector<VerbRule, MAX_VERB_ENDINGS>;
+    using VerbConjugationDictionary = etl::vector<VerbConjugation, MAX_VERB_CONJUGATIONS>;
     
+
+    struct MorphVariation {
+    uint16_t  flag;
+    AtomString ending;
+    AtomString form;
+    int type;
+    int morphology;
+    int result_type;
+    Vector<int> apply_only_to;
+    int stackable;
+    HarmonyTable* vowel_harmony;
+    int agreement;
+};
+
+
     inline int string_to_int(const String& str) {
         return etl::to_arithmetic<int>(str.c_str(), str.size());
     }
@@ -88,6 +113,11 @@
     #include <vector>
     
     using String = std::string;
+    using WordString = std::string;
+    using AtomString = std::string;
+    
+    template<typename T>
+    using Vector = std::vector<T>;
     
     typedef struct {
     int scope;
@@ -98,8 +128,6 @@
 
 using HarmonyTable = Vector<Harmony>; 
 
-    template<typename T>
-    using Vector = std::vector<T>;
             typedef struct 
         {
             Vector<String> endings;
@@ -116,9 +144,24 @@ using HarmonyTable = Vector<Harmony>;
             uint16_t flags;
             HarmonyTable* vowel_harmony;
         } VerbConjugation;
+
+
     using VerbRuleDictionary = std::vector<VerbRule>;
     using VerbConjugationDictionary = std::vector<VerbConjugation>;
     
+struct MorphVariation {
+    uint16_t  flag;
+    String ending;
+    String form;
+    int type;
+    int morphology;
+    int result_type;
+    Vector<int> apply_only_to;
+    int stackable;
+    HarmonyTable* vowel_harmony;
+    int agreement;
+};
+
     inline int string_to_int(const String& str) {
         return std::stoi(str);
     }
@@ -222,7 +265,7 @@ enum AFFIX_TYPE {
                 for (const auto& dict_entry : DICTIONARY) {            \
                     String dict_pattern = dict_entry.w;           \
                     String tmpl = var.ending;                     \
-                    String reconstructed = "";                    \
+                    WordString reconstructed = "";                    \
                     size_t d = 0, t = 0;                               \
                     while (d < dict_pattern.size()) {                  \
                         if (dict_pattern[d] == '_') {                  \
@@ -462,7 +505,7 @@ inline String remove_ending_multibyte(const String& str, const String& suffix) {
                 for (const auto& dict_entry : DICTIONARY) {            \
                     String dict_pattern = dict_entry.root;        \
                     String template_pattern = ending;             \
-                    String reconstructed = "";                    \
+                    WordString reconstructed = "";                    \
                     size_t dict_pos = 0;                               \
                     size_t temp_pos = 0;                               \
                     while (temp_pos < template_pattern.size() && dict_pos < dict_pattern.size()) { \
@@ -631,11 +674,11 @@ inline String remove_ending_multibyte(const String& str, const String& suffix) {
  int word_type = 0;\
   for (int len = 6; len >= 2; --len) {\
     if (WORD.length() >= static_cast<size_t>(len)) {\
-        String ending = WORD.substr(WORD.length() - len);\
+        AtomString ending = WORD.substr(WORD.length() - len);\
         Suffix suffResult = lookupSuff(DICTIONARY, ending.c_str());\
         if (suffResult.t) {\
             const char* mapped = suffResult.t;\
-            String stem = WORD.substr(0, WORD.length() - len);\
+            AtomString stem = WORD.substr(0, WORD.length() - len);\
             word_type = suffResult.type;\
             const char* adjResult = lookup(ADJECTIVES, stem.c_str());\
             if (adjResult) {\
@@ -793,23 +836,14 @@ enum AGREEMENT {
 
 };
 
-struct MorphVariation {
-    uint16_t  flag;
-    String ending;
-    String form;
-    int type;
-    int morphology;
-    int result_type;
-    Vector<int> apply_only_to;
-    int stackable;
-    HarmonyTable* vowel_harmony;
-    int agreement;
-};
+
 
 
 struct Morph {
     Vector<MorphVariation> variations;
 };
+
+
 struct MorphResult {
     String root;
     const MorphVariation* matched_variation; 
@@ -832,33 +866,119 @@ inline bool isNumber(String x){
     }
     return false;
 }
-
 struct Letter {
-    int pos;
-    String letter;
+    int byte_pos;   
+    String letter;  
 };
 
 
-//useful for infixation (like tagalog -um-)
-inline Letter getFirstVowel(const String& word){
-    for (size_t i = 0; i < word.length(); i++) {
-        if (isVowel(word[i])) {
-           return Letter{(int)i, String(1, word[i])};
+Letter getFirstVowel(const String& word) {
+    size_t byte_pos = 0;
+    
+    while (byte_pos < word.length()) {
+        unsigned char c = static_cast<unsigned char>(word[byte_pos]);
+        size_t char_len = 1;
+        
+        if ((c & 0x80) == 0) {
+            char_len = 1;
+        } else if ((c & 0xE0) == 0xC0) {
+            char_len = 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            char_len = 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            char_len = 4;
         }
-    }
-    return Letter{-1, ""};  
-}
-// useful for vowel harmony, not sure how to implement within the pipeline  yet, 
-
-inline Letter getLastVowel(const String& word){
-    for (int i = (int)word.length() - 1; i >= 0; i--) {
-        if (isVowel(word[i])) {
-               return Letter{(int)i, String(1, word[i])};
+        
+        String current_char = word.substr(byte_pos, char_len);
+        
+        bool is_vowel = false;
+        if (char_len == 1) {
+            char ch = word[byte_pos];
+            is_vowel = (ch == 'a' || ch == 'e' || ch == 'i' || ch == 'o' || ch == 'u' ||
+                       ch == 'A' || ch == 'E' || ch == 'I' || ch == 'O' || ch == 'U');
+        } else if (char_len == 2 && c == 0xD0) {
+            unsigned char c2 = static_cast<unsigned char>(word[byte_pos + 1]);
+            // Cyrillic vowels
+            is_vowel = (c2 == 0xB0 || c2 == 0xB5 || c2 == 0xB8 || c2 == 0xBE || 
+                       c2 == 0x83 || c2 == 0x8B || c2 == 0xAD || c2 == 0xAE || c2 == 0xAF ||
+                       (c2 >= 0x90 && c2 <= 0x9F));
         }
+        
+        if (is_vowel) {
+            return {static_cast<int>(byte_pos), current_char};
+        }
+        
+        byte_pos += char_len;
     }
-        return Letter{-1, ""}; 
+    
+    return {-1, ""};
 }
 
+Letter getLastVowel(const String& word) {
+    size_t byte_pos = 0;
+    Letter last_vowel = {-1, ""};
+    
+    while (byte_pos < word.length()) {
+        unsigned char c = static_cast<unsigned char>(word[byte_pos]);
+        size_t char_len = 1;
+        
+        if ((c & 0x80) == 0) {
+            char_len = 1;
+        } else if ((c & 0xE0) == 0xC0) {
+            char_len = 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            char_len = 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            char_len = 4;
+        }
+        
+        String current_char = word.substr(byte_pos, char_len);
+        
+        bool is_vowel = false;
+        if (char_len == 1) {
+            char ch = word[byte_pos];
+            is_vowel = (ch == 'a' || ch == 'e' || ch == 'i' || ch == 'o' || ch == 'u' ||
+                       ch == 'A' || ch == 'E' || ch == 'I' || ch == 'O' || ch == 'U');
+        } else if (char_len == 2 && c == 0xD0) {
+            unsigned char c2 = static_cast<unsigned char>(word[byte_pos + 1]);
+            is_vowel = (c2 == 0xB0 || c2 == 0xB5 || c2 == 0xB8 || c2 == 0xBE || 
+                       c2 == 0x83 || c2 == 0x8B || c2 == 0xAD || c2 == 0xAE || c2 == 0xAF ||
+                       (c2 >= 0x90 && c2 <= 0x9F));
+        }
+        
+        if (is_vowel) {
+            last_vowel = {static_cast<int>(byte_pos), current_char};
+        }
+        
+        byte_pos += char_len;
+    }
+    
+    return last_vowel;
+}
+
+// Helper to convert character position to byte position
+size_t charPosToBytePos(const String& str, int char_pos) {
+    if (char_pos <= 0) return 0;
+    
+    size_t byte_pos = 0;
+    int chars_found = 0;
+    
+    while (byte_pos < str.length() && chars_found < char_pos) {
+        unsigned char c = static_cast<unsigned char>(str[byte_pos]);
+        if ((c & 0x80) == 0) {
+            byte_pos += 1;
+        } else if ((c & 0xE0) == 0xC0) {
+            byte_pos += 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            byte_pos += 3;
+        } else {
+            byte_pos += 4;
+        }
+        chars_found++;
+    }
+    
+    return byte_pos;
+}
 
 // if the lookup passes a vowel harmony table
 // look for the corresponding vowel for the dominant one we found
@@ -1219,56 +1339,22 @@ break;
         break;
 case INFIX:
 {
-    const String& infix_to_remove = var.ending;
-    const String& trigger = var.form;
+    const String& infix_to_remove = var.ending;  
+    const String& trigger = var.form;            
     
-    // check if trigger is a number
-    bool is_number = !trigger.empty();
-    for (char c : trigger) {
-        if (c < '0' || c > '9') {
-            is_number = false;
-            break;
-        }
-    }
-    // if it is just insert there
-    if (is_number) {
-        int pos =string_to_int(trigger);
-        if (pos >= 0 && 
-            pos + infix_to_remove.length() <= word.length() &&
-            word.substr(pos, infix_to_remove.length()) == infix_to_remove) {
-            String root = word.substr(0, pos) + 
-                            word.substr(pos + infix_to_remove.length());
-            return { root, &var };
-        }
-    } 
-    // if its not a number but a type, find the index to insert
-
-    // BEFORE FIRST VOWEL
-    else if (trigger == "BFV") {
-        Letter first_vowel = getFirstVowel(word);
-        if (first_vowel.pos >= 0) {
-            if (first_vowel.pos + infix_to_remove.length() <= word.length() &&
-                word.substr(first_vowel.pos, infix_to_remove.length()) == infix_to_remove) {
-                String root = word.substr(0, first_vowel.pos) + 
-                                  word.substr(first_vowel.pos + infix_to_remove.length());
+    if (trigger == "BFV") {
+        Letter first_vowel = getFirstVowel(word); 
+        
+        if (first_vowel.byte_pos >= 0) {
+            int infix_pos = first_vowel.byte_pos - infix_to_remove.length();
+            if (infix_pos >= 0 && 
+                infix_pos + infix_to_remove.length() <= word.length() &&
+                word.substr(infix_pos, infix_to_remove.length()) == infix_to_remove) {
+                
+                String root = word.substr(0, infix_pos) + 
+                             word.substr(infix_pos + infix_to_remove.length());
                 return { root, &var };
-            }
-        }
-    }
-
-    // BEFORE LAST VOWEL
-
-    else if (trigger == "BLV") {
-        Letter last_vowel = getLastVowel(word);
-        if (last_vowel.pos >= 0) {
-            int infix_start = last_vowel.pos - infix_to_remove.length();
-            if (infix_start >= 0 && 
-                infix_start + infix_to_remove.length() <= word.length() &&
-                word.substr(infix_start, infix_to_remove.length()) == infix_to_remove) {
-                String root = word.substr(0, infix_start); 
-                root +=  word.substr(last_vowel.pos);
-                return { root, &var };
-            }
+            } 
         }
     }
 }
@@ -1443,42 +1529,59 @@ inline String apply_morph(
                 
                 return result;
             }
-                if (var.type == INFIX) {
-                    if (var.flag == from_var->flag) {
-                        const String& infix_to_add = var.ending;
-                        const String& trigger = var.form;
-                        String result = translation;
-                        
-                        bool is_number = !trigger.empty();
-                        for (char c : trigger) {
-                            if (c < '0' || c > '9') {
-                                is_number = false;
-                                break;
-                            }
+        if (var.type == INFIX) {
+                if (var.flag == from_var->flag) {
+                    const String& infix_to_add = var.ending;
+                    const String& trigger = var.form;
+                    String result = translation;
+                    
+                    // Helper to convert character position to byte position
+                    auto charPosToBytePos = [](const String& str, int char_pos) -> size_t {
+                        if (char_pos <= 0) return 0;
+                        size_t byte_pos = 0;
+                        int chars_found = 0;
+                        while (byte_pos < str.length() && chars_found < char_pos) {
+                            unsigned char c = static_cast<unsigned char>(str[byte_pos]);
+                            if ((c & 0x80) == 0) byte_pos += 1;
+                            else if ((c & 0xE0) == 0xC0) byte_pos += 2;
+                            else if ((c & 0xF0) == 0xE0) byte_pos += 3;
+                            else byte_pos += 4;
+                            chars_found++;
                         }
-                        
-                        if (is_number) {
-                            int pos =string_to_int((trigger));
-                            if (pos >= 0 && pos <= (int)result.length()) {
-                                result.insert(pos, infix_to_add);
-                            }
+                        return byte_pos;
+                    };
+                    
+                    bool is_number = !trigger.empty();
+                    for (char c : trigger) {
+                        if (c < '0' || c > '9') {
+                            is_number = false;
+                            break;
                         }
-                        else if (trigger == "BFV") {
-                            Letter first_vowel = getFirstVowel(result);
-                            if (first_vowel.pos >= 0) {
-                                result.insert(first_vowel.pos, infix_to_add);
-                            }
-                        }
-                        else if (trigger == "BLV") {
-                            Letter last_vowel = getLastVowel(result);
-                            if (last_vowel.pos >= 0) {
-                                result.insert(last_vowel.pos, infix_to_add);
-                            }
-                        }
-                        
-                        return result;
                     }
+                    
+                    if (is_number) {
+                        int char_pos = string_to_int(trigger);
+                        size_t byte_pos = charPosToBytePos(result, char_pos);
+                        if (byte_pos <= result.length()) {
+                            result.insert(byte_pos, infix_to_add);
+                        }
+                    }
+                    else if (trigger == "BFV") {
+                        Letter first_vowel = getFirstVowel(result);
+                        if (first_vowel.byte_pos >= 0) {
+                            result.insert(first_vowel.byte_pos, infix_to_add);
+                        }
+                    }
+                    else if (trigger == "BLV") {
+                        Letter last_vowel = getLastVowel(result);
+                        if (last_vowel.byte_pos >= 0) {
+                            result.insert(last_vowel.byte_pos, infix_to_add);
+                        }
+                    }
+                    
+                    return result;
                 }
+            }
                 else if ((form.empty() || 
                     (translation.size() >= form.size() &&
                     translation.compare(translation.size() - form.size(), form.size(), form) == 0)) && 
@@ -1489,16 +1592,14 @@ inline String apply_morph(
                             result = translation.substr(0, translation.size() - form.size());
                             result += affix;
                             return result;
-                            return result;
                             
                         case PREFIX:
-                            if (translation.size() >= ending.size() &&
-                                translation.compare(0, ending.size(), ending) == 0)
-                            {
-                                        result += translation.substr(form.size());
-                                        result += affix;
-                                        return result;
-                            }
+                        
+                            result = affix;
+                            result += translation.substr(form.size());
+                            
+                            return result;
+                            
                             break;
                             
                         case PREV_WORD:
@@ -2364,6 +2465,36 @@ inline uint16_t lookupFlags(const Entry (&dict)[N], const char* word) {
     return 0;
 }
 
+inline uint16_t lookupFlags_test(const Entry* dict, size_t count, const char* word) {
+    for (size_t i = 0; i < count; ++i) {
+        const char* p = dict[i].w;
+        const char* q = word;
+        while (*p && *q && *p == *q) { ++p; ++q; }
+        if (*p == *q) {
+            return dict[i].flags;
+        }
+        
+        if (dict[i].w2 && dict[i].w2[0]) {
+            p = dict[i].w2;
+            q = word;
+            while (*p && *q && *p == *q) { ++p; ++q; }
+            if (*p == *q) {
+                return dict[i].flags;
+            }
+        }
+        
+        if (dict[i].w3 && dict[i].w3[0]) {
+            p = dict[i].w3;
+            q = word;
+            while (*p && *q && *p == *q) { ++p; ++q; }
+            if (*p == *q) {
+                return dict[i].flags;
+            }
+        }
+    }
+    return 0;
+}
+
 enum FlagTarget {
     CHECK_FIRST_WORD,
     CHECK_SECOND_WORD,
@@ -2488,6 +2619,7 @@ template <size_t N>
 inline const char* lookup(const Entry (&dict)[N], const char* word, int script_index = 0) {
     for (size_t i = 0; i < N; ++i) {
         const char* p = dict[i].w;
+        if (!p) continue;  
         const char* q = word;
         while (*p && *q && *p == *q) { ++p; ++q; }
         if (*p == *q) {
@@ -2524,23 +2656,43 @@ inline const char* lookup(const Entry (&dict)[N], const char* word, int script_i
     return nullptr;
 }
 
-inline const char* lookup_test(const Entry* dict, size_t count, const char* word)
+inline const char* lookup_test(const Entry* dict, size_t count, const char* word, int script_index = 0)
 {
-    for (size_t i = 0; i < count; ++i)
-    {
+    for (size_t i = 0; i < count; ++i) {
         const char* p = dict[i].w;
+        if (!p) continue;  
         const char* q = word;
-
-        if (!p) continue;
-
-        while (*p && *q && *p == *q)
-        {
-            ++p;
-            ++q;
+        while (*p && *q && *p == *q) { ++p; ++q; }
+        if (*p == *q) {
+            if (script_index == 0) return dict[i].t;
+            if (script_index == 1 && dict[i].t2 && dict[i].t2[0]) return dict[i].t2;
+            if (script_index == 2 && dict[i].t3 && dict[i].t3[0]) return dict[i].t3;
+            return dict[i].t; 
         }
-
-        if (*p == '\0' && *q == '\0')
-            return dict[i].t;
+        
+        if (dict[i].w2 && dict[i].w2[0]) {
+            p = dict[i].w2;
+            q = word;
+            while (*p && *q && *p == *q) { ++p; ++q; }
+            if (*p == *q) {
+                if (script_index == 0) return dict[i].t;
+                if (script_index == 1 && dict[i].t2 && dict[i].t2[0]) return dict[i].t2;
+                if (script_index == 2 && dict[i].t3 && dict[i].t3[0]) return dict[i].t3;
+                return dict[i].t;
+            }
+        }
+        
+        if (dict[i].w3 && dict[i].w3[0]) {
+            p = dict[i].w3;
+            q = word;
+            while (*p && *q && *p == *q) { ++p; ++q; }
+            if (*p == *q) {
+                if (script_index == 0) return dict[i].t;
+                if (script_index == 1 && dict[i].t2 && dict[i].t2[0]) return dict[i].t2;
+                if (script_index == 2 && dict[i].t3 && dict[i].t3[0]) return dict[i].t3;
+                return dict[i].t;
+            }
+        }
     }
     return nullptr;
 }
@@ -2600,6 +2752,7 @@ template <size_t N>
 inline Verb verb_lookup(const Verb (&dict)[N], const char* word) {
     for (size_t i = 0; i < N; ++i) {
         const char* p = dict[i].root;
+        if (!p) continue;  
         const char* q = word;
         while (*p && *q && *p == *q) { ++p; ++q; }
         if (*p == *q) return Verb{
@@ -2633,6 +2786,7 @@ template <size_t N>
 inline uint8_t lookupVerbFlags(const Verb (&dict)[N], const char* word) {
     for (size_t i = 0; i < N; ++i) {
         const char* p = dict[i].root;
+        if (!p) continue;  
         const char* q = word;
         while (*p && *q && *p == *q) { ++p; ++q; }
         if (*p == *q) return dict[i].flags;
@@ -2645,6 +2799,7 @@ template <size_t N>
 Suffix lookupSuff(const Suffix (&dict)[N], const char* word) {
     for (size_t i = 0; i < N; ++i) {
         const char* p = dict[i].w;
+        if (!p) continue;  
         const char* q = word;
         while (*p && *q && *p == *q) { ++p; ++q; }
 
@@ -2659,6 +2814,7 @@ template <size_t N>
 inline uint8_t lookupSuffFlags(const Suffix (&dict)[N], const char* word) {
     for (size_t i = 0; i < N; ++i) {
         const char* p = dict[i].root;
+        if (!p) continue;  
         const char* q = word;
         while (*p && *q && *p == *q) { ++p; ++q; }
         if (*p == *q) return dict[i].flags;
@@ -3041,6 +3197,7 @@ inline auto lookupFunction(const char* query)
     for (int i = 0; i < actionCount; i++) {
 
         const char* p = query;
+        if (!p) continue;          
         const char* r = actions[i].key;
         while (*p && *r && (*p == *r)) {
             p++;
@@ -3143,8 +3300,9 @@ inline bool rule(
 
 
 inline bool default_multibyte = false;
+inline bool default_autoCorrect = false;
 inline unsigned int ngrams_length = 0;
-static inline Entry default_fixed_ngrams[] = {
+static inline Entry default_fixed_ngrams[MAX_ENTRIES] = {
   {"", ""}
 };
 
@@ -3176,12 +3334,12 @@ Info default_info = {
 
 
 inline unsigned int nouns_length = 0;
-inline Entry default_nouns[50];
+inline Entry default_nouns[MAX_ENTRIES];
 
 inline unsigned int verbs_length = 0;
-inline Verb default_verbs[50];
+inline Verb default_verbs[MAX_ENTRIES];
 
-inline Vector<String> temp_verb_endings;
+inline Vector<AtomString> temp_verb_endings;
 inline String temp_required_ending;
 inline String temp_affix;
 inline uint8_t temp_type = 0;
@@ -3189,35 +3347,48 @@ inline uint8_t temp_type = 0;
 // whenever parsing the binary, use push_back instead of [i] = value to add new entries.
 // unless etl?
 
-inline VerbRuleDictionary default_endings = {
-    VerbRule{{""}, NONE, INFINITIVE}
-};
+inline VerbRuleDictionary default_endings;
 
-inline VerbConjugationDictionary default_conjugations = {
-    {INFINITIVE, SUFFIX, "", "る"}
-};
-
+inline VerbConjugationDictionary default_conjugations;
 
 MORPH_DEF(default_morph_from,
     {
-        {0, "", "", SUFFIX, NONE},
+        {0, "r", "BFV", INFIX, FOCUS_MORPH, NOUN, {NOUN}, STACKABLE, NO_VOWEL_HARMONY},
     });
 
 MORPH_DEF(default_morph_to,
 {
-        {0, "", "", SUFFIX, NONE},
+        {0, "ес", "BLV", INFIX, FOCUS_MORPH, NOUN, {NOUN}, STACKABLE, NO_VOWEL_HARMONY},
 });
 
 
+
+HOMONYM_DEF(
+    are,
+    HOMONYM_OUTCOMES(
+        { "são", VERB },
+        { "somos", VERB }
+    ),
+    HOMONYM_FORBIDDEN(98, 99),
+    "eles","$", "nós"
+);
+
+
+Homonym default_homonyms[] = {
+    HOMONYM("are", are)
+};
+
+
+
 inline unsigned int adjective_length = 0;
-inline Entry default_adjectives[50];
+inline Entry default_adjectives[MAX_ENTRIES];
 
 inline unsigned int pronoun_length = 0;
-inline Entry default_pronouns[20];
+inline Entry default_pronouns[MAX_ENTRIES];
 
 
 inline unsigned int adverb_length = 0;
-inline Entry default_adverbs[50];
+inline Entry default_adverbs[MAX_ENTRIES];
 
 inline char buffer[250];
 
@@ -3231,25 +3402,23 @@ struct NormalizationRule {
 };
 inline unsigned int target_flags_length = 0;
 inline unsigned int normalizationRuleLength = 0;
-inline NormalizationRule default_normalizationRules[7];
+inline NormalizationRule default_normalizationRules[MAX_NORMALIZATION_RULES];
+inline unsigned int normalization_ruleCount = 0;
 
-inline String default_normalize(
-    String word,
-    NormalizationRule* rules,
-    unsigned int rule_count
+inline String normalize(
+    String word
 ) {
     String normalized_ = word;
-     for (unsigned int i = 0; i < rule_count; ++i)
+     for (unsigned int i = 0; i < normalization_ruleCount; ++i)
 {
     NORMALIZE(
-        rules[i].from,
-        rules[i].type,
-        rules[i].to
+        default_normalizationRules[i].from,
+        default_normalizationRules[i].type,
+        default_normalizationRules[i].to
     );
 }
     return normalized_;
 }
-
 
 static Vector<Word> default_reorderHelpers(const Vector<Word>& copy){
     Vector<Word> sentence_arr = copy;
@@ -3257,11 +3426,12 @@ static Vector<Word> default_reorderHelpers(const Vector<Word>& copy){
 
     for (size_t i = 0; i < sentence_arr.size(); ++i) {
      INIT_REORDER()
-      if (sentence_arr.at(i).type != -1){\
-             reordered_arr.push_back(Word{ sentence_arr.at(i).word, sentence_arr.at(i).translation, sentence_arr.at(i).type});\
-      }
+     DEFAULT()
+     
     }
 CLEANUP(reordered_arr)
+
+
 
 Vector<Word> final_arr;
 for (size_t i = 0; i < reordered_arr.size(); ++i) {
@@ -3334,30 +3504,95 @@ static Word default_verb_lookup(const String& word) {
 
 
 static Word default_nounLookup(const String& word) {
-    if (const char* result = lookup_test(default_nouns, nouns_length,word.c_str())) { 
-        String translation = result; 
-        int word_type = NOUN; 
-        return { word, default_normalize(translation, default_normalizationRules,normalizationRuleLength), word_type }; 
-    }else if(const char* result = lookup_test(default_adjectives, adjective_length,word.c_str())){
+    // Define lookup configurations: {dictionary, length, word_type}
+    struct LookupConfig {
+        const Entry* dict;
+        unsigned int length;
+        int type;
+    };
+    
+    const LookupConfig configs[] = {
+        {default_nouns, nouns_length, NOUN},
+        {default_adjectives, adjective_length, ADJECTIVE},
+        {default_pronouns, pronoun_length, PRONOUN},
+        {default_adverbs, adverb_length, ADVERB}
+    };
+    
+    // Loop through all word types
+    for (const auto& cfg : configs) {
+        if (const char* result = lookup_test(cfg.dict, cfg.length, word.c_str())) { 
             String translation = result; 
-            int word_type = ADJECTIVE; 
-            return { word, default_normalize(translation, default_normalizationRules,normalizationRuleLength), word_type }; 
-    }else if(const char* result = lookup_test(default_pronouns, pronoun_length,word.c_str())){
-            String translation = result; 
-            int word_type = ADJECTIVE; 
-            return { word, default_normalize(translation, default_normalizationRules,normalizationRuleLength), word_type }; 
-    }else if(const char* result = lookup_test(default_adverbs, adverb_length,word.c_str())){
-            String translation = result; 
-            int word_type = ADVERB; 
-            return { word, default_normalize(translation, default_normalizationRules,normalizationRuleLength), word_type }; 
+            int word_type = cfg.type; 
+            return { word, normalize(translation), word_type }; 
+        }
     }
-
+    
     Word vw = default_verb_lookup(word);
+    // verbs return -1 type when no verb is matched
     if (vw.type != -1) return vw;
-    return Word{ word, default_normalize(word, default_normalizationRules,normalizationRuleLength), -1 };  
+
+     /* REGULAR MORPHOLOGICAL DETECTION */                              
+       {                                                                   
+        const Morph* morph_from_ptr = &(default_morph_from);                   
+        String current_word = word;                               
+        Vector<const MorphVariation*> applied_morphs;             
+        bool found_root = false;                                      
+        const char* result = nullptr;                                  
+        uint16_t flags = 0;                                            
+        int found_type = UNKNOWN;  // Track the type from dictionary lookup
+        /* i'll limit it for 10 right now, but when agglutinative languages i'll inflate */ 
+        int safety = 10;                                               
+        while (!found_root && safety-- > 0) {                          
+            MorphResult p = detect_morph(current_word, morph_from_ptr); 
+            if (p.matched_variation != nullptr) {                      
+                if (p.matched_variation->stackable == STACKABLE) {     
+                    /* check if it is stackable*/                      
+                    applied_morphs.push_back(p.matched_variation);     
+                    current_word = p.root;                             
+                    /* Try lookup with stripped word */                
+                    // Check against all dictionaries
+                    for (const auto& cfg : configs) {
+                        if ((result = lookup_test(cfg.dict, cfg.length, current_word.c_str()))) {
+                            flags = lookupFlags_test(cfg.dict, cfg.length, current_word.c_str());
+                            found_type = cfg.type;
+                            found_root = true;
+                            break;
+                        }
+                    }
+                    if (found_root) break;
+                } else {                                               
+                    /* Non-stackable, just get it and stop */          
+                    applied_morphs.push_back(p.matched_variation);     
+                    // Check against all dictionaries
+                    for (const auto& cfg : configs) {
+                        if ((result = lookup_test(cfg.dict, cfg.length, p.root.c_str()))) {
+                            flags = lookupFlags_test(cfg.dict, cfg.length,p.root.c_str());
+                            found_type = cfg.type;
+                            found_root = true;
+                            break;
+                        }
+                    }
+                    break;
+                }                                                      
+            } else {                                                   
+                break;                                                 
+            }                                                          
+        }                                                              
+        if (found_root) {                                              
+            String translation = result;                          
+            const Morph* morph_to_ptr = &(default_morph_to);                   
+            for (auto it = applied_morphs.rbegin(); it != applied_morphs.rend(); ++it) { 
+                translation = apply_morph(translation, *it, morph_to_ptr, flags); 
+            }                                                          
+            return { word, normalize(translation), found_type, 0, flags };   
+        }                                                              
+    }    
+
+
+    //fallback, words with no matching at all return type -1 unchanged strings
+    return Word{ word, normalize(word), -1 };  
 
 }
-
 // mapping out how i'm gonna receive the binary file buffers to dinamically define the rules 
 // it works!!
 inline String load_from_bin(const uint8_t* file, size_t size)
@@ -3369,11 +3604,51 @@ inline String load_from_bin(const uint8_t* file, size_t size)
     const char* r = nullptr;
     String from = "";
     String to = "";
+    String temp_affix;
+  #ifdef ETL_BUILD
+    new (&default_endings) VerbRuleDictionary();
+    new (&default_conjugations) VerbConjugationDictionary();
+    new (&temp_verb_endings) Vector<AtomString>();
+    new (&temp_required_ending) AtomString();
+    new (&temp_type) uint8_t(0);
+    
+    for (int i = 0; i < MAX_NORMALIZATION_RULES; i++) {
+        new (&default_normalizationRules[i]) NormalizationRule();
+    new (&default_normalizationRules[i].from) String();
+    new (&default_normalizationRules[i].to) String();
+    }
+    for (int i = 0; i < MAX_ENTRIES; i++) {
+        new (&default_nouns[i]) Entry();
+        new (&default_adjectives[i]) Entry();
+        new (&default_adverbs[i]) Entry();
+        new (&default_verbs[i]) Verb();
+        if (i < 20) new (&default_pronouns[i]) Entry();
+    }
+    
+    // Clear to initial state
     default_endings.clear();
     default_conjugations.clear();
-    nouns_length = 0;
-    verbs_length = 0;
-    adjective_length = 0;
+    temp_verb_endings.clear();
+    temp_required_ending.clear();
+    temp_type = 0;
+    normalizationRuleLength = 0;
+#else
+    // STL: just clear
+    default_endings.clear();
+    default_conjugations.clear();
+    temp_verb_endings.clear();
+    temp_required_ending.clear();
+    temp_affix.clear();
+    temp_type = 0;
+    normalizationRuleLength = 0;
+#endif
+
+            // Always reset these
+            nouns_length = 0;
+            verbs_length = 0;
+            adjective_length = 0;
+            pronoun_length = 0;
+            adverb_length = 0;
 
     uint8_t word_length = 0;
     uint8_t ngram_size = 0x01;
@@ -3388,24 +3663,33 @@ inline String load_from_bin(const uint8_t* file, size_t size)
 
         switch (marker)
         {
+            // metadata
             case 0xD0:
             current_area = 0;
             break;
-
+// dicrtionary entries
         case 0xD1:
             current_area = 1;
             break;
+// rules, kind of fazed out by now, but we'll see
         case 0xD2:
             current_area = 2;
             break;
+// verb endings
         case 0xD3:
             current_area = 3;
             break;
+// verb conjugations (target)
         case 0xD4:
             current_area = 4;
             break;
+//normalizations
         case 0xD5:
             current_area = 5;
+            break;
+// morphology (THE MOST IMPORTANT OF THEM ALLLLLL)
+        case 0xD6:
+            current_area = 6;
             break;
 case 0xF0:
 {
@@ -3434,7 +3718,7 @@ case 0xF0:
     {
         uint8_t ending_count = *ptr++;
         if (current_area == 3) {
-            Vector<String> endings;
+            Vector<AtomString> endings;
             for (int i = 0; i < ending_count; i++) {
                 s = reinterpret_cast<const char*>(ptr);
                 String ending = String(s);
@@ -3504,10 +3788,14 @@ case 0xF2:
         // dictionary type handling
     }
     else if (current_area == 2) {
-        default_normalizationRules[normalizationRuleLength++] = 
-            NormalizationRule{s, r, type};
+        // default_normalizationRules[normalizationRuleLength++] = 
+        //     NormalizationRule{s, r, type};
     }
     else if (current_area == 3) {
+            if (default_endings.size() >= MAX_VERB_ENDINGS) {
+        
+                break;  // dont add if overflowing
+            }
         // Create VerbRule from temp data
         VerbRule rule;
         rule.endings = temp_verb_endings;
@@ -3519,24 +3807,28 @@ case 0xF2:
         temp_verb_endings.clear();
     }
     else if (current_area == 4) {
+        if (default_conjugations.size() >= MAX_VERB_CONJUGATIONS) {
+        break; 
+    }
+    
         VerbConjugation conj;
         conj.form = type; // form flags (INFINITIVE, PAST, etc.)
         conj.type = temp_type; // SUFFIX/PREFIX
         conj.required_ending = temp_required_ending;
         conj.affix = temp_affix;
-        
-        default_conjugations.push_back(conj);
+    
+         default_conjugations.push_back(conj);
     }
-       else if (current_area == 5) {
-        // Create normalization rule
-        if (s && r) {
+     else if (current_area == 5) {
+    if (s && r) {
+       if (normalizationRuleLength < MAX_NORMALIZATION_RULES) {
             default_normalizationRules[normalizationRuleLength++] = 
                 NormalizationRule{String(s), String(r), type};
-        }
-        // Reset pointers to avoid reuse
-        s = nullptr;
-        r = nullptr;
+        } 
     }
+    s = nullptr;
+    r = nullptr;
+}
     break;
 }
            case 0xF3:
@@ -3686,6 +3978,7 @@ default:
 // std::cout << "Verb conjugations: " << default_conjugations.size() << "\n";
 // std::cout << "Normalization rules: " << normalizationRuleLength << "\n";
 // std::cout << "Multibyte? " << (default_multibyte == 0 ? "No" : "Yes") << "\n";
+// After loading, before returning
 return String("Loaded translator: "/**+ from + " > " + to + "\n" */ );
 }
 inline String translate_from_bin(const char* sentence,
