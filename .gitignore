@@ -43,3 +43,4 @@ etl
 *.out
 massif.*
 *.sh
+*.elf

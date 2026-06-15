@@ -65,7 +65,8 @@
     
 
     struct MorphVariation {
-    uint16_t  flag;
+    uint16_t flag;
+    uint16_t required_flags; 
     AtomString ending;
     AtomString form;
     int type;
@@ -83,8 +84,8 @@
     }
 
     typedef struct{
-        SmallVector<String, 5> source;
-        SmallVector<String, 5> target;
+        SmallVector<WordString, 5> source;
+        SmallVector<WordString, 5> target;
     } Transfers; 
 
     
@@ -162,6 +163,7 @@ using HarmonyTable = Vector<Harmony>;
     
 struct MorphVariation {
     uint16_t  flag;
+    uint16_t required_flags; 
     String ending;
     String form;
     int type;
@@ -256,121 +258,6 @@ enum AFFIX_TYPE {
     NONE = 14
 };
 
-// wait i'll add this as a note so i don't get lost
-// the morph objects can take STACKABLE or NOT_STACKABLE
-// if they can stack, not only you look for root + morph, you look for all the morphologies that are also stackable
-// like morph + root + morph (e.g malay: ber-$-an), or stuff like root + morph + morph (e.g turkish: $-lar-ım)
-// if found, you simply pass the root without all of them to the morph too
-// does that make sense? maybe, its 4:05 am i haven't slept
-// IT WORKSSSSSSSSSSSSSSSSS, tested with portuguese ('inh' -> diminutive_neutral, 'o' -> masc_gender, 's' -> plural)
-//successfully turns cachorr-inh-o-s into little dogs ( i lwk dont even remember why that works? but the apply morph hasnt done anythign crazy yetm, so i dont care)
-#define LOOKUP(DICTIONARY, TYPE, WORD, MORPH_FROM, MORPH_TO, SCRIPT)          \
-{                                                                       \
-    /* Direct lookup first, try any of the scripts */                                          \
-    if (const char* result = lookup(DICTIONARY, WORD.c_str(), 0)) {       \
-        uint16_t flags = lookupFlags_test(DICTIONARY, WORD.c_str());        \
-        return { WORD, normalize(result), TYPE, 0, flags };            \
-    }                                                                   \
-    else if (const char* result = lookup(DICTIONARY, WORD.c_str(), 1)) {       \
-        uint16_t flags = lookupFlags_test(DICTIONARY, WORD.c_str());        \
-        return { WORD, normalize(result), TYPE, 0, flags };            \
-    }                                                                   \
-                                                                        \
-    /* NON-CONCATENATIVE TEMPLATIC DETECTION */                         \
-    {                                                                   \
-        const Morph* morph_from_ptr = &(MORPH_FROM);                   \
-        for (const auto& var : morph_from_ptr->variations) {           \
-            if (var.type == TRANSFIX) {              \
-                for (const auto& dict_entry : DICTIONARY) {            \
-                    String dict_pattern = dict_entry.w;           \
-                    String tmpl = var.ending;                     \
-                    WordString reconstructed = "";                    \
-                    size_t d = 0, t = 0;                               \
-                    while (d < dict_pattern.size()) {                  \
-                        if (dict_pattern[d] == '_') {                  \
-                            if (t < tmpl.size() && tmpl[t] == '_') {   \
-                                /* both underscore: skip */            \
-                                d++; t++;                              \
-                            } else if (t < tmpl.size()) {              \
-                                /* template has letter: add it */      \
-                                reconstructed += tmpl[t];              \
-                                d++; t++;                              \
-                            } else {                                   \
-                                /* no template left: skip underscore */ \
-                                d++;                                   \
-                            }                                          \
-                        } else {                                       \
-                            /* consonant: add it */                    \
-                            reconstructed += dict_pattern[d];          \
-                            /* if template has underscore, consume it */ \
-                            if (t < tmpl.size() && tmpl[t] == '_') {   \
-                                t++;                                   \
-                            }                                          \
-                            d++;                                       \
-                        }                                              \
-                    }                                                  \
-                    /* ignore any remaining template letters */        \
-                    if (reconstructed == WORD) {                       \
-                        const char* result = lookup(DICTIONARY, dict_pattern.c_str()); \
-                        if (result) {                                 \
-                            uint16_t flags = lookupFlags_test(DICTIONARY, dict_pattern.c_str()); \
-                            String translation = result;         \
-                            const Morph* morph_to_ptr = &(MORPH_TO);   \
-                            translation = apply_morph(translation, &var, morph_to_ptr, flags); \
-                            return { WORD, normalize(translation), TYPE, 0, flags }; \
-                        }                                             \
-                    }                                                 \
-                }                                                     \
-            }                                                         \
-        }                                                             \
-    }                                                                 \
-                                                                        \
-    /* REGULAR MORPHOLOGICAL DETECTION */                              \
-    {                                                                   \
-        const Morph* morph_from_ptr = &(MORPH_FROM);                   \
-        String current_word = WORD;                               \
-        Vector<const MorphVariation*> applied_morphs;             \
-        bool found_root = false;                                       \
-        const char* result = nullptr;                                  \
-        uint16_t flags = 0;                                            \
-        /* i'll limit it for 10 right now, but when agglutinative languages i'll inflate */ \
-        int safety = 10;                                               \
-        while (!found_root && safety-- > 0) {                          \
-            MorphResult p = detect_morph(current_word, morph_from_ptr); \
-            if (p.matched_variation != nullptr) {                      \
-                if (p.matched_variation->stackable == STACKABLE) {     \
-                    /* check if it is stackable*/                      \
-                    applied_morphs.push_back(p.matched_variation);     \
-                    current_word = p.root;                             \
-                    /* Try lookup with stripped word */                \
-                    if ((result = lookup(DICTIONARY, current_word.c_str()))) { \
-                        flags = lookupFlags_test(DICTIONARY, current_word.c_str()); \
-                        found_root = true;                             \
-                        break;                                         \
-                    }                                                  \
-                } else {                                               \
-                    /* Non-stackable, just get it and stop */          \
-                    applied_morphs.push_back(p.matched_variation);     \
-                    if ((result = lookup(DICTIONARY, p.root.c_str()))) { \
-                        flags = lookupFlags_test(DICTIONARY, p.root.c_str()); \
-                        found_root = true;                             \
-                    }                                                  \
-                    break;                                             \
-                }                                                      \
-            } else {                                                   \
-                break;                                                 \
-            }                                                          \
-        }                                                              \
-        if (found_root) {                                              \
-            String translation = result;                          \
-            const Morph* morph_to_ptr = &(MORPH_TO);                   \
-            for (auto it = applied_morphs.rbegin(); it != applied_morphs.rend(); ++it) { \
-                translation = apply_morph(translation, *it, morph_to_ptr, flags); \
-            }                                                          \
-            return { WORD, normalize(translation), TYPE, 0, flags };   \
-        }                                                              \
-    }                                                                  \
-}
 #define NO_MORPH (Morph*)nullptr
 #define NO_CASE (Case*)nullptr
 #define NO_VOWEL_HARMONY nullptr
@@ -1091,6 +978,8 @@ inline String apply_case(
                 if(var.v_h != nullptr){
                      const HarmonyTable& v_h = *(var.v_h); 
                     affix = checkVowelHarmony(translation, form, v_h);
+                    }else{
+                        affix = form;
                     }
             if (translation.size() >= ending.size() &&
                 translation.compare(translation.size() - ending.size(), ending.size(), ending) == 0) 
@@ -1568,8 +1457,8 @@ inline String apply_morph(
                 
                 return result;
             }
-        if (var.type == INFIX) {
-                if (var.flag == from_var->flag) {
+                    if (var.type == INFIX) {
+                    if (var.required_flags == 0 || (flag & var.required_flags) == var.required_flags) {
                     const String& infix_to_add = var.ending;
                     const String& trigger = var.form;
                     String result = translation;
@@ -1624,7 +1513,7 @@ inline String apply_morph(
             else if ((form.empty() || 
     (translation.size() >= form.size() &&
     translation.compare(translation.size() - form.size(), form.size(), form) == 0)) && 
-    (var.flag == 0 || (flag & var.flag) == var.flag)) { 
+    (var.required_flags == 0 || (flag & var.required_flags) == var.required_flags)) {
                     switch (var.type) {
                         
                         case SUFFIX:
@@ -1701,7 +1590,9 @@ inline String apply_morph(
         }
         dict_pos++;
     }
-    
+    if (var.flag != 0) {
+        flag |= var.flag;
+    }
     return result;
 }
 break;
@@ -1958,7 +1849,7 @@ String name(const char* sentence) { \
             Word current_translation_temp = reordered_arr.at(i); \
             Word next_translation_temp = reordered_arr.at(i + 1); \
             if (current.type == 3 && (next.type == 0 || next.type == 4)) { \
-                uint16_t f = lookupFlags_test(nouns, next.word.c_str()); \
+                uint16_t f = lookupFlags_test(default_nouns, nouns_length, next.word.c_str());\
                 CaseResult g = detect_case(current.word, FROM_CASE); \
                 if ((INFO_ARG)->clause_order_to == SVO) { \
                     next.translation = apply_case(next.translation, g.matched_variation, TO_CASE, f); \
@@ -1977,28 +1868,27 @@ String name(const char* sentence) { \
 #define HANDLE_TRANSFERS(INFO_ARG, ARR, MORPH_TO_OBJ) \
     do { \
        if ((ARR).size() >= 1) { \
-            bool found = false; \
-            for (int p_i = 0; p_i < (INFO_ARG)->def_from_count && !found; ++p_i) { \
+            for (int p_i = 0; p_i < (INFO_ARG)->def_from_count; ++p_i) { \
                 Definiteness def_from = (INFO_ARG)->def_from[p_i]; \
                 int type_from = def_from.type; \
                 if(type_from == PREFIX || type_from == SUFFIX || type_from == CIRCUMFIX || type_from == INFIX) { \
-                    for (size_t i = 0; i < (ARR).size() && !found; ++i) { \
+                    for (size_t i = 0; i < (ARR).size(); ++i) { \
                         if (type_from == SUFFIX) { \
                             if(endsWith((ARR)[i].word, def_from.addition)) { \
-                                 found = true; \
+                                 /* found */ \
                             } \
                         } \
                         if (type_from == PREFIX) { \
                             if((ARR)[i].word.substr(0, def_from.addition.length()) == def_from.addition) { \
-                                found = true; \
+                                /* found */ \
                             } \
                         } \
                     } \
              } else { \
-    for (size_t i = 1; i < (ARR).size() && !found; ++i) { \
+    for (size_t i = 1; i < (ARR).size(); ++i) { \
         if (type_from == PREV_WORD) { \
                     if ((ARR)[i - 1].word == def_from.addition) { \
-                        for (int t_i = 0; t_i < (INFO_ARG)->def_to_count && !found; ++t_i) { \
+                        for (int t_i = 0; t_i < (INFO_ARG)->def_to_count; ++t_i) { \
                             Definiteness def_to = (INFO_ARG)->def_to[t_i]; \
                               String affix = def_to.addition;\
                     if(def_to.vowel_harmony != nullptr){\
@@ -2015,7 +1905,6 @@ String name(const char* sentence) { \
                                     (ARR)[i - 1].translation = (ARR)[i].translation + affix; \
                                     break;\
                                  }(ARR).erase((ARR).begin() + i); \
-                                    found = true; \
                             } \
                         } \
                     } \
@@ -2908,6 +2797,90 @@ inline void remove_pair(Vector<Word>& output) {
     }
 }
 
+struct TransferRule {
+    Vector<String> source_pattern;  // e.g., {"é", "*1", "de", "*3"}
+    Vector<String> target_pattern;  // e.g., {"*1", "чтобы", "сделать"}
+};
+
+Vector<TransferRule> transfers = {
+    {{"é", "*1", "de", "*3"}, 
+    {"*1", "чтобы", "*3"}}
+};static Vector<Word> applyTransferRules(const Vector<Word>& copy) {
+    Vector<Word> sentence_arr = copy;
+    Vector<Word> reordered_arr;
+    
+    Vector<bool> consumed(sentence_arr.size(), false);
+    
+    size_t i = 0;
+    while (i < sentence_arr.size()) {
+        if (consumed[i]) {
+            ++i;
+            continue;
+        }
+        
+        bool matched = false;
+        
+        for (const auto& rule : transfers) {
+            size_t pattern_len = rule.source_pattern.size();
+            if (i + pattern_len > sentence_arr.size()) continue;
+            
+            Vector<int> captured_indices;
+            bool match_failed = false;
+            
+            for (size_t j = 0; j < pattern_len; ++j) {
+                const String& pattern_token = rule.source_pattern[j];
+                const Word& current_word = sentence_arr[i + j];
+                
+                if (pattern_token[0] == '*') {
+                    int required_type = string_to_int(pattern_token.substr(1));
+                    if (current_word.type == required_type) {
+                        captured_indices.push_back(i + j);
+                    } else {
+                        match_failed = true;
+                        break;
+                    }
+                } else {
+                    if (current_word.word != pattern_token) {
+                        match_failed = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (!match_failed) {
+                for (const String& target_token : rule.target_pattern) {
+                    if (target_token[0] == '*') {
+                        int source_position = string_to_int(target_token.substr(1));
+                        int original_pos = i + source_position;
+                        reordered_arr.push_back(sentence_arr[original_pos]);
+                    } else {
+                        Word new_word;
+                        new_word.word = target_token;
+                        new_word.translation = target_token;
+                        new_word.type = -1;
+                        reordered_arr.push_back(new_word);
+                    }
+                }
+                
+                for (size_t j = 0; j < pattern_len; ++j) {
+                    consumed[i + j] = true;
+                }
+                
+                matched = true;
+                i += pattern_len;
+                break;
+            }
+        }
+        
+        if (!matched) {
+            reordered_arr.push_back(sentence_arr[i]);
+            ++i;
+        }
+    }
+    
+    return reordered_arr;
+}
+
 // all the lookups
 
 using Reorder = Vector<Word>(*)(const Vector<Word>&);
@@ -2922,6 +2895,7 @@ inline String unigramLookup(const Vector<String>& array_of_words,
 
   int match_type;
   String sentence;
+  
   for(size_t i = 0; i < array_of_words.size(); ++i){
     
 Word match = nounLookup(array_of_words[i]);
@@ -2950,9 +2924,10 @@ Word match = nounLookup(array_of_words[i]);
       break;
     }
   }
-  if(word_arr.size() > 0) sentence_arr = reorder_helpers(word_arr);
 if(word_arr.size() > 0) {
-    sentence_arr = reorder_helpers(word_arr);
+   
+    if(transfers.size() > 0) sentence_arr = applyTransferRules(word_arr);
+    sentence_arr = reorder_helpers(sentence_arr);
 }
   
  for (size_t i = 0; i < sentence_arr.size(); ++i) {
@@ -3347,13 +3322,13 @@ Info default_info = {
     NOUN_FIRST,        
     ADJECTIVE_FIRST,
     { 
-        
-       { PREV_WORD, "", 0, NO_VOWEL_HARMONY },
+        { PREV_WORD, "os", 0, NO_VOWEL_HARMONY },
+       { PREV_WORD, "o", 0, NO_VOWEL_HARMONY }
     }, 
     { 
         { SUFFIX, "", 0, NO_VOWEL_HARMONY }
     },
-    1,
+    2,
     1,
     {0},
     {1}
@@ -3379,7 +3354,7 @@ int temp_morph_morphology = 0;
 int temp_morph_result_type = 0;
 Vector<int> temp_morph_apply_only_to;
 int temp_morph_stackable = 0;
-int temp_morph_agreement = 0;
+int temp_morph_agreement = 1;
 
 // whenever parsing the binary, use push_back instead of [i] = value to add new entries.
 // unless etl?
@@ -3391,12 +3366,16 @@ inline VerbConjugationDictionary default_conjugations;
 inline Morph default_morph_from;
 inline Morph default_morph_to;
 
-// this will suck to implement, but i'll try eventually
-
-Transfers transfer = {
-    {"é", "*ADJECTIVE" "de" "*VERB"},
-    {"*ADJ", "чтобы", "сделать"}
-};
+CASE_DEF(cases, SUFFIX,
+{
+  {ACCUSATIVE, FEMININE_GENDER, "а", "у"},   // собака -> собаку
+  {GENITIVE, FEMININE_GENDER, "а", "чья"},
+  {GENITIVE, 0, "", ""},
+    {ACCUSATIVE, FEMININE_GENDER, "я", "ю"},   // неделя ->  неделю
+    {ACCUSATIVE, 0, "", ""},    // мужчина → мужчину handled separately maybe
+    {ACCUSATIVE, NEUTRAL_GENDER, "о", "о"},    // окно -> окно (same for accusative)
+   {ACCUSATIVE, NEUTRAL_GENDER, "е", "е"}     // море -> море
+});
 
 HOMONYM_DEF(
     are,
@@ -3485,6 +3464,7 @@ CLEANUP(reordered_arr)
 
 HANDLE_TRANSFERS(&default_info, reordered_arr, default_morph_to);
 
+HANDLE_CASE(&default_info, NO_CASE, &cases);
 
 Vector<Word> final_arr;
 for (size_t i = 0; i < reordered_arr.size(); ++i) {
@@ -3493,66 +3473,126 @@ for (size_t i = 0; i < reordered_arr.size(); ++i) {
     return final_arr;
 }
 
-
 static Word default_verb_lookup(const String& word) {
-    if (verbs_length == 0 || default_endings.empty() || default_conjugations.empty())
+    if (verbs_length == 0)
         return Word{word, word, -1, 0, 0};
 
     bool multibyte = default_multibyte;
 
-    for (const auto& group : default_endings) {
-        for (const auto& ending : group.endings) {
-            if (word.size() <= ending.size()) continue;
-            
-            bool ends_with = false;
-            if (multibyte) {
-                if (word.compare(word.size() - ending.size(), ending.size(), ending) == 0)
-                    ends_with = true;
-            } else {
-                if (word.compare(word.size() - ending.size(), ending.size(), ending) == 0)
-                    ends_with = true;
-            }
-            if (!ends_with) continue;
+    // First, check for exact matches in verb dictionary
+    Verb v = find_verb_in_array(default_verbs, verbs_length, word.c_str());
+    if (v.t && *v.t) {
+        uint16_t verb_flags = v.flags;
+        return Word{word, normalize(v.t), VERB, 0, verb_flags};
+    }
 
-            String root = word.substr(0, word.size() - ending.size());
+    // Try suffix-stripping using verb endings
+    if (!default_endings.empty() && !default_conjugations.empty()) {
+        for (const auto& group : default_endings) {
+            for (const auto& ending : group.endings) {
+                if (word.size() <= ending.size()) continue;
+                
+                bool ends_with = false;
+                if (multibyte) {
+                    if (word.compare(word.size() - ending.size(), ending.size(), ending) == 0)
+                        ends_with = true;
+                } else {
+                    if (word.compare(word.size() - ending.size(), ending.size(), ending) == 0)
+                        ends_with = true;
+                }
+                if (!ends_with) continue;
 
-            Verb v = find_verb_in_array(default_verbs, verbs_length, root.c_str());
-            if (v.t && *v.t) {
-                String translation = v.t;
-                uint16_t verb_flags = v.flags;
+                String root = word.substr(0, word.size() - ending.size());
 
-                for (const auto& conj : default_conjugations) {
-                    if (conj.form != group.form) continue;
+                Verb v = find_verb_in_array(default_verbs, verbs_length, root.c_str());
+                if (v.t && *v.t) {
+                    String translation = v.t;
+                    uint16_t verb_flags = v.flags;
 
-                    bool condition_met = conj.required_ending.empty();
-                    if (!conj.required_ending.empty()) {
-                        if (translation.size() >= conj.required_ending.size() &&
-                            translation.compare(translation.size() - conj.required_ending.size(),
-                                                conj.required_ending.size(),
-                                                conj.required_ending) == 0) {
-                            condition_met = true;
-                            translation = translation.substr(0, translation.size() - conj.required_ending.size());
+                    for (const auto& conj : default_conjugations) {
+                        if (conj.form != group.form) continue;
+
+                        bool condition_met = conj.required_ending.empty();
+                        if (!conj.required_ending.empty()) {
+                            if (translation.size() >= conj.required_ending.size() &&
+                                translation.compare(translation.size() - conj.required_ending.size(),
+                                                    conj.required_ending.size(),
+                                                    conj.required_ending) == 0) {
+                                condition_met = true;
+                                translation = translation.substr(0, translation.size() - conj.required_ending.size());
+                            }
                         }
-                    }
 
-                    if (condition_met) {
-                        String result;
-                        if (conj.type == PREFIX){
-                            result += conj.affix;
-                            result += translation;
+                        if (condition_met) {
+                            String result;
+                            if (conj.type == PREFIX){
+                                result += conj.affix;
+                                result += translation;
+                            }
+                            else { 
+                                result += translation;
+                                result += conj.affix;
+                            }
+                            return Word{word, result, VERB, 0, verb_flags};  
                         }
-                        else { 
-                            result += translation;
-                            result += conj.affix;
-                        }
-                        return Word{word, result, VERB, 0, verb_flags};  
                     }
                 }
             }
         }
     }
+
+    // MORPHOLOGICAL DERIVATION (source morphology)
+    if (!default_morph_from.variations.empty()) {
+        const Morph* morph_from_ptr = &(default_morph_from);
+        const Morph* morph_to_ptr = &(default_morph_to);
+        String current_word = word;
+        Vector<const MorphVariation*> applied_morphs;
+        bool found_root = false;
+        const char* result = nullptr;
+        uint16_t flags = 0;
+        int safety = 10;
+        
+        while (!found_root && safety-- > 0) {
+            MorphResult p = detect_morph(current_word, morph_from_ptr);
+            if (p.matched_variation != nullptr) {
+                if (p.matched_variation->stackable == STACKABLE) {
+                    applied_morphs.push_back(p.matched_variation);
+                    current_word = p.root;
+                    
+                    Verb v = find_verb_in_array(default_verbs, verbs_length, current_word.c_str());
+                    if (v.t && *v.t) {
+                        result = v.t;
+                        flags = v.flags;
+                        found_root = true;
+                        break;
+                    }
+                } else {
+                    applied_morphs.push_back(p.matched_variation);
+                    Verb v = find_verb_in_array(default_verbs, verbs_length, p.root.c_str());
+                    if (v.t && *v.t) {
+                        result = v.t;
+                        flags = v.flags;
+                        found_root = true;
+                    }
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        
+        if (found_root) {
+            String translation = result;
+            for (auto it = applied_morphs.rbegin(); it != applied_morphs.rend(); ++it) {
+                translation = apply_morph(translation, *it, morph_to_ptr, flags);
+            }
+            return Word{word, normalize(translation), VERB, 0, flags};
+        }
+    }
+
     return Word{word, word, -1, 0, 0};
 }
+
 static Word default_nounLookup(const String& word) {
     // Define lookup configurations: {dictionary, length, word_type}
     struct LookupConfig {
@@ -3577,14 +3617,74 @@ static Word default_nounLookup(const String& word) {
         return { word, normalize(translation), word_type, 0, word_flags };
     }
 }
-    
+    int found_type = -1;
     Word vw = default_verb_lookup(word);
     // verbs return -1 type when no verb is matched
     if (vw.type != -1) return vw;
 
+/* NON-CONCATENATIVE TEMPLATIC DETECTION */                              
+{                                                                   
+    const Morph* morph_from_ptr = &(default_morph_from);                   
+    for (const auto& var : morph_from_ptr->variations) {           
+        if (var.type == TRANSFIX) {
+            // Try each dictionary configuration
+            for (const auto& cfg : configs) {
+                const Entry* dict = cfg.dict;
+                size_t dict_length = cfg.length;
+                int dict_type = cfg.type;
+                
+                for (size_t i = 0; i < dict_length; i++) {
+                    const Entry& dict_entry = dict[i];
+                    String dict_pattern = dict_entry.w;
+                    String tmpl = var.ending;
+                    String reconstructed = "";
+                    size_t d = 0, t = 0;
+                    
+                    while (d < dict_pattern.size()) {
+                        if (dict_pattern[d] == '-') {
+                            if (t < tmpl.size() && tmpl[t] == '-') {
+                                /* both underscore: skip */
+                                d++;
+                                t++;
+                            } else if (t < tmpl.size()) {
+                                /* template has letter: add it */
+                                reconstructed += tmpl[t];
+                                d++;
+                                t++;
+                            } else {
+                                /* no template left: skip underscore */
+                                d++;
+                            }
+                        } else {
+                            /* consonant: add it */
+                            reconstructed += dict_pattern[d];
+                            /* if template has underscore, consume it */
+                            if (t < tmpl.size() && tmpl[t] == '-') {
+                                t++;
+                            }
+                            d++;
+                        }
+                    }
+                    /* ignore any remaining template letters */
+                    if (reconstructed == word) {
+                        const char* result = lookup_test(dict, dict_length, dict_pattern.c_str());
+                        if (result) {
+                            uint16_t flags = lookupFlags_test(dict, dict_length, dict_pattern.c_str());
+                            String translation = result;
+                            const Morph* morph_to_ptr = &(default_morph_to);
+                            translation = apply_morph(translation, &var, morph_to_ptr, flags);
+                            return { word, normalize(translation), dict_type, 0, flags };
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
      /* REGULAR MORPHOLOGICAL DETECTION */                              
        {                                                                   
-        const Morph* morph_from_ptr = &(default_morph_from);                   
+        const Morph* morph_from_ptr = &(default_morph_from);               
         String current_word = word;                               
         Vector<const MorphVariation*> applied_morphs;             
         bool found_root = false;                                      
@@ -3606,8 +3706,20 @@ static Word default_nounLookup(const String& word) {
                         if ((result = lookup_test(cfg.dict, cfg.length, current_word.c_str()))) {
                             flags = lookupFlags_test(cfg.dict, cfg.length, current_word.c_str());
                             found_type = cfg.type;
-                            found_root = true;         
-                            break;
+                            
+                            // Check if morph allows this part of speech
+                            bool type_allowed = p.matched_variation->apply_only_to.empty();
+                            for (int allowed_type : p.matched_variation->apply_only_to) {
+                                if (allowed_type == found_type) {
+                                    type_allowed = true;
+                                    break;
+                                }
+                            }
+                            
+                            if (type_allowed) {
+                                found_root = true;
+                                break;
+                            }
                         }
                     }
                     if (found_root) break;
@@ -3619,8 +3731,20 @@ static Word default_nounLookup(const String& word) {
                         if ((result = lookup_test(cfg.dict, cfg.length, p.root.c_str()))) {
                             flags = lookupFlags_test(cfg.dict, cfg.length,p.root.c_str());
                             found_type = cfg.type;
-                            found_root = true;
-                            break;
+                            
+                            // Check if morph allows this part of speech
+                            bool type_allowed = p.matched_variation->apply_only_to.empty();
+                            for (int allowed_type : p.matched_variation->apply_only_to) {
+                                if (allowed_type == found_type) {
+                                    type_allowed = true;
+                                    break;
+                                }
+                            }
+                            
+                            if (type_allowed) {
+                                found_root = true;
+                                break;
+                            }
                         }
                     }
                     break;
@@ -3647,7 +3771,7 @@ static Word default_nounLookup(const String& word) {
 }
 // mapping out how i'm gonna receive the binary file buffers to dinamically define the rules 
 // it works!!
-inline String load_from_bin(const uint8_t* file, size_t size)
+inline String load(const uint8_t* file, size_t size)
 {
     const uint8_t* ptr = reinterpret_cast<const uint8_t*>(file);
     const uint8_t* end = ptr + size;
@@ -3795,13 +3919,19 @@ case 0xF0:
     
     // Required flags
     uint8_t req_count = read_byte(ptr);
-    uint16_t flag_mask = 0;
+    uint16_t required_flags = 0;
     for (uint8_t i = 0; i < req_count; i++) {
-        flag_mask |= read_byte(ptr);
+        required_flags |= read_byte(ptr);
     }
 
     uint8_t stackable_byte = read_byte(ptr);
 
+    uint16_t result_flags = 0;
+    if (current_area == 7) {
+        uint8_t low_byte = *ptr++;
+        uint8_t high_byte = *ptr++;
+        result_flags = low_byte | (high_byte << 8);
+    }
     
     // Apply only to list
     uint8_t apply_count = read_byte(ptr);
@@ -3811,20 +3941,23 @@ case 0xF0:
     }
     
     uint8_t result_type = read_byte(ptr);
-    uint8_t harmony = read_byte(ptr);  // not used
+    uint8_t agreement = read_byte(ptr);
+    uint8_t harmony = read_byte(ptr);  
+
     
     // Create and push immediately, since both source and target are the same structures
     MorphVariation var;
-    var.flag = flag_mask;
+    var.flag = result_flags;
+    var.required_flags = required_flags;
     var.ending = affix;
     var.form = trigger;
-    var.type = temp_morph_morphology;
+    var.type = affix_type;
     var.morphology = morphology_type;
     var.result_type = result_type;
     var.apply_only_to = apply_only_to;
     var.stackable = stackable_byte;
     var.vowel_harmony = nullptr;
-    var.agreement = 0;
+    var.agreement = agreement;
     
     if (current_area == 6) {
         default_morph_from.variations.push_back(var);
@@ -4016,10 +4149,20 @@ case 0xF2:
 
     // std::cout << "Source morph variations: " << default_morph_from.variations.size() << std::endl;
     // std::cout << "Target morph variations: " << default_morph_to.variations.size() << std::endl;
+printf("Loaded translator: %s > %s\n", from.c_str(), to.c_str());
+printf("  Dictionary: %d nouns, %d adjectives, %d pronouns, %d adverbs, %d verbs\n", 
+       nouns_length, adjective_length, pronoun_length, adverb_length, verbs_length);
+printf("  Verb endings: %zu groups, %zu conjugations\n", 
+       default_endings.size(), default_conjugations.size());
+printf("  Morphology: %zu source, %zu target\n", 
+       default_morph_from.variations.size(), default_morph_to.variations.size());
+printf("  Normalization rules: %d\n", normalizationRuleLength);
+printf("  Multibyte: %s\n", (default_multibyte == 0 ? "No" : "Yes"));
 
-return String("Loaded translator: "/**+ from + " > " + to + "\n" */ );
+
+return String("Loaded translator: " + from + " > " + to + "\n");
 }
-inline String translate_from_bin(const char* sentence,
+inline String translate(const char* sentence,
                                       int script = 0,
                                       bool auto_correct = false)
 {
