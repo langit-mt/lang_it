@@ -2379,57 +2379,56 @@ enum Flags : uint64_t {
     FREE_BIT_31 = 1ULL << 63
 };
 
-
 enum VerbFlags : uint64_t {
-    // TENSE (bits 0-4)
+    // TENSE
     INFINITIVE = 1ULL << 0,
     PRESENT = 1ULL << 1,
     PAST = 1ULL << 2,
     FUTURE = 1ULL << 3,
     CONTINUOUS = 1ULL << 4,
     
-    // MOOD (bits 5-8)
+    // MOOD
     INDICATIVE = 1ULL << 5,
     SUBJUNCTIVE = 1ULL << 6,
     IMPERATIVE = 1ULL << 7,
     CONDITIONAL = 1ULL << 8,
     
-    // ASPECT (bits 9-12)
+    // ASPECT
     SIMPLE = 1ULL << 9,
     PERFECTIVE = 1ULL << 10,
     IMPERFECTIVE = 1ULL << 11,
     PROGRESSIVE = 1ULL << 12,
     
-    // VOICE (bits 13-14)
+    // VOICE
     ACTIVE = 1ULL << 13,
     PASSIVE = 1ULL << 14,
     
-    // ANIMACY (bits 15-16)
+    // ANIMACY
     INANIMATE = 1ULL << 15,
-    ANIMATE_V = 1ULL << 16,
+    ANIMATE_V = 1ULL << 16, 
     
-    // PERSON (bits 17-21)
-    FIRST_PERSON = 1ULL << 17,
-    SECOND_PERSON = 1ULL << 18,
+    // PERSON
+    FIRST_PERSON_V = 1ULL << 17,  
+    SECOND_PERSON_V = 1ULL << 18,  
     THIRD_PERSON = 1ULL << 19,
     FOURTH_PERSON = 1ULL << 20,
     ZERO_PERSON = 1ULL << 21,
     
-    // NUMBER (bits 22-24)
+    // NUMBER
     SINGULAR = 1ULL << 22,
-    PLURAL_V = 1ULL << 23,
+    PLURAL_V = 1ULL << 23,         
     DUAL = 1ULL << 24,
     
-    // GENDER (bits 25-27)
+    // GENDER
     MASCULINE = 1ULL << 25,
-    FEMININE_V = 1ULL << 26,
+    FEMININE_V = 1ULL << 26,    
     NEUTER = 1ULL << 27,
     
-    // FREE BITS (bits 28-29)
-    FREE_BIT_1 = 1ULL << 28,
-    FREE_BIT_2 = 1ULL << 29,
+    // FREE BITS
+    FREE_BIT_1_V = 1ULL << 28,
+    FREE_BIT_2_V = 1ULL << 29,
     
-    // VERB FLAGS (bits 30-40)
+    // VERB FLAGS
     MODAL_VERB = 1ULL << 30,
     AUXILIARY_VERB = 1ULL << 31,
     CAUSATIVE_VERB = 1ULL << 32,
