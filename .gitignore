@@ -44,4 +44,4 @@ etl
 massif.*
 *.sh
 *.elft
-testing/doctest
+testing/doctest/

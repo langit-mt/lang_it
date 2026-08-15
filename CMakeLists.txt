@@ -79,3 +79,4 @@ cmake_minimum_required(VERSION 3.6)
  endif()
 
  install(TARGETS lang_it RUNTIME DESTINATION bin)
+

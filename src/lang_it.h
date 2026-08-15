@@ -7,11 +7,11 @@
 #include <cstring>
 #include <cstddef>
 // if you use ETL, set the fixed size of vectors, strings and structure arrays
-#define MAX_STRING_LENGTH 50
-#define MAX_VECTOR_LENGTH 14
+#define MAX_STRING_LENGTH 80
+#define MAX_VECTOR_LENGTH 20
 #define MAX_VERB_ENDINGS 12
 #define MAX_VERB_CONJUGATIONS 5
-#define MAX_ENTRIES 100
+#define MAX_ENTRIES 200
 #define MAX_NORMALIZATION_RULES 20
 
 
@@ -21,6 +21,7 @@
     #include "etl/to_arithmetic.h"
     
     using String = etl::string<MAX_STRING_LENGTH>;
+    
     using WordString = etl::string<15>;
     using AtomString = etl::string<7>;
     
@@ -175,6 +176,7 @@ struct MorphVariation {
     int agreement;
 };
 
+    const String PREV_MARKER = "\u200B";
     inline int string_to_int(const String& str) {
         return std::stoi(str);
     }
@@ -1012,32 +1014,36 @@ inline String apply_case(
 {
     if (!case_to || case_to->variations.empty())
         return translation;
+        
+if (!from_var && case_to) {
+    for (const auto& var : case_to->variations) {
 
-    if (!from_var && case_to) {
-        for (const auto& var : case_to->variations) {
-            if (var.flag == target_case_type) {
-                if (flags == 0 || (var.gender & flags)) {
-                    String result = translation;
-                    String affix = "";
-                    if (var.v_h != nullptr) {
-                        affix = checkVowelHarmony(translation, var.form, *(var.v_h));
-                    } else {
-                        affix = var.form;
-                    }
-                    
-                    if (var.affix_type == SUFFIX) {
-                        result += affix;
-                    } else if (var.affix_type == PREFIX) {
-                        result = affix + result;
-                    }
-                    // Add other affix types as needed
-                    
-                    return result;
+        if (var.flag == target_case_type) {
+            if (flags == 0 || (var.gender & flags)) {
+                String result = translation;
+                String affix = "";
+                if (var.v_h != nullptr) {
+                    affix = checkVowelHarmony(translation, var.form, *(var.v_h));
+                } else {
+                    affix = var.form;
                 }
+                
+                if (!affix.empty() && translation.size() >= affix.size() &&
+                    translation.compare(translation.size() - affix.size(), affix.size(), affix) == 0) {
+                   return translation;
+                }
+                
+                if (var.affix_type == SUFFIX) {
+                    result += affix;
+                } else if (var.affix_type == PREFIX) {
+                    result = affix + result;
+                }
+               return result;
             }
         }
-        return translation;
-    } else if (from_var && !case_to) {
+    }
+    return translation;
+}else if (from_var && !case_to) {
         // Case → non-case
         const String& affix = from_var->form;
         if (from_var->affix_type == SUFFIX) {
@@ -1092,27 +1098,39 @@ inline MorphResult detect_morph(const String& word, const Morph* morph_from, con
     if (!morph_from) {
         return { word, nullptr };
     }
+    if (word.find(PREV_MARKER) != String::npos) {
+        return { word, nullptr };
+    }
 
+    if (word_index < 0 || word_index >= (int)sentence.size()) {
+        return { word, nullptr };
+    }
     for (const auto& var : morph_from->variations) {
         int type = var.type;  
+        
 
         switch(type){
        
-         case PREV_WORD:
+        case PREV_WORD: {
+    const String& prev_word = var.ending; 
+    
+if (word_index > 0 && word_index < sentence.size() && sentence[word_index - 1] == prev_word){
+        String marked = word + PREV_MARKER;
+         return { marked, &var };
+    }
+    break;
+}
+        case NEXT_WORD:
         {
-            
-                const String& prev_word = var.ending; 
+                const String& next_word = var.ending; 
                 const String& singular_ending = var.form;  
                 // i need to think about this, now this part does have access to the other itens on the array, but i'm not sure how to modify for removal
-                if (word_index > 0 && sentence[word_index - 1] == prev_word)
+                if (word_index < sentence.size() && sentence[word_index + 1] == next_word)
                 {
                     return { word, &var };
                 }
-            }
 
-        break;
-        case NEXT_WORD:
-        {}
+        }
         break;
       case TOTAL_REDUPLICATION:
         {
@@ -1389,120 +1407,65 @@ inline String apply_morph(
         return translation;
 
     int source_morph = from_var->morphology; 
-         String result;
+    String result;
     for (const auto& var : morph_to->variations) {
-        
         if (var.morphology == source_morph) { 
-        
-        const String& ending = var.ending;
-        const String& form   = var.form;
-
-        
-        String affix = ending;
-                if(var.vowel_harmony != nullptr){
-                       const HarmonyTable& v_h = *(var.vowel_harmony);
+            const String& ending = var.ending;
+            const String& form   = var.form;
+            
+            String affix = ending;
+            if (var.vowel_harmony != nullptr) {
+                uintptr_t addr = reinterpret_cast<uintptr_t>(var.vowel_harmony);
+                if (addr >= 0x1000 && addr < 0x7fffffffffff && 
+                    !(addr >= 0x7fff00000000 && addr <= 0x7fffffffffff)) {
+                    const HarmonyTable& v_h = *(var.vowel_harmony);
+                    if (!v_h.empty()) {
                         affix = checkVowelHarmony(translation, ending, v_h);
-                    // ifd theres valid vowel harmony, replace the vowel
-                }
-                
-                // infixes and reduplication use a specific format for trigger so i'll do it apart
-                if(var.type == TOTAL_REDUPLICATION){
-                        const String& trigger = var.form;
-                        int times =string_to_int(trigger);
-                        String result = translation;
-                        switch (times)
-                        {
-                        case 2:       
-                           result = translation + translation;
-                        break;
-                        case 3:       
-                           result = translation + translation + translation;
-                        break;
-                        default:
-                            break;
-                        }
-                        
-                           return result;
-                }
-                if(var.type == PARTIAL_REDUPLICATION_PREFIX) {
-                    String pattern = var.ending;  // like "CVC", "CV", "VC", etc.
-                    String trigger = var.form;    // "B" for beginning, "E" for ending
-                    String result = translation;
-                    String matchedPart;
-                    
-                    if (trigger == "B") {
-                        if (translation.length() >= pattern.length()) {
-                            bool matches = true;
-                            for (int i = 0; i < pattern.length(); i++) {
-                                char patternChar = pattern[i];
-                                char wordChar = translation[i];
-                                
-                                if (patternChar == 'C' && isVowel(wordChar)) {
-                                    matches = false;
-                                    break;
-                                }
-                                else if (patternChar == 'V' && !isVowel(wordChar)) {
-                                    matches = false;
-                                    break;
-                                }
-                            }
-                            if (matches) {
-                                matchedPart = translation.substr(0, pattern.length());
-                            }
-                        }
+                    } else {
+                        affix = ending;
                     }
-                    else if (trigger == "E") {
-                        // Look at ENDING of translation to find pattern
-                        if (translation.length() >= pattern.length()) {
-                            bool matches = true;
-                            int startPos = translation.length() - pattern.length();
-                            for (int i = 0; i < pattern.length(); i++) {
-                                char patternChar = pattern[i];
-                                char wordChar = translation[startPos + i];
-                                
-                                if (patternChar == 'C' && isVowel(wordChar)) {
-                                    matches = false;
-                                    break;
-                                }
-                                else if (patternChar == 'V' && !isVowel(wordChar)) {
-                                    matches = false;
-                                    break;
-                                }
-                            }
-                            if (matches) {
-                                matchedPart = translation.substr(startPos);
-                            }
-                        }
-                    }
-                    
-                    // add the reduplicated pattern to  BEGINNING ( cause PREFIX)
-                    if (!matchedPart.empty()) {
-                        result = matchedPart;
-                        result += translation;
-                    }
-                    
-                    return result;
+                } else {
+                    affix = ending;
                 }
-               if(var.type == PARTIAL_REDUPLICATION_SUFFIX) {
-                String pattern = var.ending;  // like "CVC", "CV", "VC", etc.
-                String trigger = var.form;    // "B" for beginning, "E" for ending
+            } else {
+                affix = ending;
+            }
+            
+            // DUPLICATE CHECK DISABLED - was preventing 'ax' from being added
+            // because 'nõmenax' already ends with 'ax'
+            // if (!affix.empty() && translation.size() >= affix.size() &&
+            //     translation.compare(translation.size() - affix.size(), affix.size(), affix) == 0) {
+            //     return translation;
+            // }
+
+            // infixes and reduplication use a specific format for trigger so i'll do it apart
+            if (var.type == TOTAL_REDUPLICATION) {
+                const String& trigger = var.form;
+                int times = string_to_int(trigger);
+                String result = translation;
+                switch (times) {
+                    case 2: result = translation + translation; break;
+                    case 3: result = translation + translation + translation; break;
+                    default: break;
+                }
+                return result;
+            }
+            if (var.type == PARTIAL_REDUPLICATION_PREFIX) {
+                String pattern = var.ending;
+                String trigger = var.form;
                 String result = translation;
                 String matchedPart;
                 
-                // find the pattern either on B eginning or E nding
                 if (trigger == "B") {
-                    // Look at BEGINNING of translation to find pattern
                     if (translation.length() >= pattern.length()) {
                         bool matches = true;
                         for (int i = 0; i < pattern.length(); i++) {
                             char patternChar = pattern[i];
                             char wordChar = translation[i];
-                            
                             if (patternChar == 'C' && isVowel(wordChar)) {
                                 matches = false;
                                 break;
-                            }
-                            else if (patternChar == 'V' && !isVowel(wordChar)) {
+                            } else if (patternChar == 'V' && !isVowel(wordChar)) {
                                 matches = false;
                                 break;
                             }
@@ -1511,21 +1474,17 @@ inline String apply_morph(
                             matchedPart = translation.substr(0, pattern.length());
                         }
                     }
-                }
-                else if (trigger == "E") {
-                    // look at ending
+                } else if (trigger == "E") {
                     if (translation.length() >= pattern.length()) {
                         bool matches = true;
                         int startPos = translation.length() - pattern.length();
                         for (int i = 0; i < pattern.length(); i++) {
                             char patternChar = pattern[i];
                             char wordChar = translation[startPos + i];
-                            
                             if (patternChar == 'C' && isVowel(wordChar)) {
                                 matches = false;
                                 break;
-                            }
-                            else if (patternChar == 'V' && !isVowel(wordChar)) {
+                            } else if (patternChar == 'V' && !isVowel(wordChar)) {
                                 matches = false;
                                 break;
                             }
@@ -1536,21 +1495,67 @@ inline String apply_morph(
                     }
                 }
                 
-               // add the reduplicated pattern to  ENDING ( cause SUFFIX)
                 if (!matchedPart.empty()) {
-                    result = translation;
-                    result += matchedPart;
+                    result = matchedPart + translation;
                 }
-                
                 return result;
             }
-                    if (var.type == INFIX) {
-                    if (var.required_flags == 0 || (flag & var.required_flags) == var.required_flags) {
+            if (var.type == PARTIAL_REDUPLICATION_SUFFIX) {
+                String pattern = var.ending;
+                String trigger = var.form;
+                String result = translation;
+                String matchedPart;
+                
+                if (trigger == "B") {
+                    if (translation.length() >= pattern.length()) {
+                        bool matches = true;
+                        for (int i = 0; i < pattern.length(); i++) {
+                            char patternChar = pattern[i];
+                            char wordChar = translation[i];
+                            if (patternChar == 'C' && isVowel(wordChar)) {
+                                matches = false;
+                                break;
+                            } else if (patternChar == 'V' && !isVowel(wordChar)) {
+                                matches = false;
+                                break;
+                            }
+                        }
+                        if (matches) {
+                            matchedPart = translation.substr(0, pattern.length());
+                        }
+                    }
+                } else if (trigger == "E") {
+                    if (translation.length() >= pattern.length()) {
+                        bool matches = true;
+                        int startPos = translation.length() - pattern.length();
+                        for (int i = 0; i < pattern.length(); i++) {
+                            char patternChar = pattern[i];
+                            char wordChar = translation[startPos + i];
+                            if (patternChar == 'C' && isVowel(wordChar)) {
+                                matches = false;
+                                break;
+                            } else if (patternChar == 'V' && !isVowel(wordChar)) {
+                                matches = false;
+                                break;
+                            }
+                        }
+                        if (matches) {
+                            matchedPart = translation.substr(startPos);
+                        }
+                    }
+                }
+                
+                if (!matchedPart.empty()) {
+                    result = translation + matchedPart;
+                }
+                return result;
+            }
+            if (var.type == INFIX) {
+                if (var.required_flags == 0 || (flag & var.required_flags) == var.required_flags) {
                     const String& infix_to_add = var.ending;
                     const String& trigger = var.form;
                     String result = translation;
                     
-                    // Helper to convert character position to byte position
                     auto charPosToBytePos = [](const String& str, int char_pos) -> size_t {
                         if (char_pos <= 0) return 0;
                         size_t byte_pos = 0;
@@ -1580,139 +1585,110 @@ inline String apply_morph(
                         if (byte_pos <= result.length()) {
                             result.insert(byte_pos, infix_to_add);
                         }
-                    }
-                    else if (trigger == "BFV") {
+                    } else if (trigger == "BFV") {
                         Letter first_vowel = getFirstVowel(result);
                         if (first_vowel.byte_pos >= 0) {
                             result.insert(first_vowel.byte_pos, infix_to_add);
                         }
-                    }
-                    else if (trigger == "BLV") {
+                    } else if (trigger == "BLV") {
                         Letter last_vowel = getLastVowel(result);
                         if (last_vowel.byte_pos >= 0) {
                             result.insert(last_vowel.byte_pos, infix_to_add);
                         }
                     }
-                    
                     return result;
                 }
             }
             if (var.type == SIMULFIX) {
-                    const String& replacement = var.ending;
-                    const String& trigger = var.form;
-                    String result = translation;
-                    size_t pos = result.find(trigger);
-                    if (pos != String::npos) {
-                        result.replace(pos, trigger.size(), replacement);
-                    }
-                    return result;
+                const String& replacement = var.ending;
+                const String& trigger = var.form;
+                String result = translation;
+                size_t pos = result.find(trigger);
+                if (pos != String::npos) {
+                    result.replace(pos, trigger.size(), replacement);
                 }
+                return result;
+            }
             else if ((form.empty() || 
-    (translation.size() >= form.size() &&
-    translation.compare(translation.size() - form.size(), form.size(), form) == 0)) && 
-    (var.required_flags == 0 || (flag & var.required_flags) == var.required_flags)) {
-                    switch (var.type) {
-                        
-                        case SUFFIX:
-                        
-                            result = translation.substr(0, translation.size() - form.size());
-                            result += affix;
-                            return result;
-                            
-                        case PREFIX:
-                        
-                            result = affix;
-                            result += translation.substr(form.size());
-                            
-                            return result;
-                            
-                            break;
-                        case PREV_WORD:
-                            result += form;
-                            result += " ";
-                            return translation;
-                        break;
-                            
-                        case NEXT_WORD:
-                            result += translation;
-                            result += affix;
-                            return result;
-                        break;
-
-                        case TRANSFIX:
-{
-    String dict_pattern = translation;
-    String template_pattern = var.ending;
-    String result = "";
-    size_t dict_pos = 0;
-    size_t temp_pos = 0;
-    
-    /* Apply template to translation */
-    while (temp_pos < template_pattern.size() && dict_pos < dict_pattern.size()) {
-        if (template_pattern[temp_pos] == '_') {
-            while (dict_pos < dict_pattern.size() && dict_pattern[dict_pos] != '_') {
-                result += dict_pattern[dict_pos];
-                dict_pos++;
-            }
-            if (dict_pos < dict_pattern.size() && dict_pattern[dict_pos] == '_') {
-                dict_pos++;
-            }
-            temp_pos++;
-        } else {
-            while (dict_pos < dict_pattern.size() && dict_pattern[dict_pos] != '_') {
-                result += dict_pattern[dict_pos];
-                dict_pos++;
-            }
-            if (dict_pos < dict_pattern.size() && dict_pattern[dict_pos] == '_') {
-                result += template_pattern[temp_pos];
-                dict_pos++;
-            } else {
-                result += template_pattern[temp_pos];
-            }
-            temp_pos++;
-        }
-    }
-    
-    while (temp_pos < template_pattern.size()) {
-        if (template_pattern[temp_pos] != '_') {
-            result += template_pattern[temp_pos];
-        }
-        temp_pos++;
-    }
-    
-    while (dict_pos < dict_pattern.size()) {
-        if (dict_pattern[dict_pos] != '_') {
-            result += dict_pattern[dict_pos];
-        }
-        dict_pos++;
-    }
-    if (var.flag != 0) {
-        flag |= var.flag;
-    }
-    return result;
-}
-break;
-
-                        case CIRCUMFIX:
-                     {   const String& full_circumfix = affix; 
-                        String delimiter = "$"; //common delimiter i use is '$'
-                        //get the prefix
+                (translation.size() >= form.size() &&
+                translation.compare(translation.size() - form.size(), form.size(), form) == 0)) && 
+                (var.required_flags == 0 || (flag & var.required_flags) == var.required_flags)) {
+                switch (var.type) {
+                    case SUFFIX:
+                        result = translation.substr(0, translation.size() - form.size());
+                        result += affix;
+                        return result;
+                    case PREFIX:
+                        result = affix + translation.substr(form.size());
+                        return result;
+                    case PREV_WORD:
+                        result += form;
+                        result += " ";
+                        return translation;
+                    case NEXT_WORD:
+                        result += translation;
+                        result += affix;
+                        return result;
+                    case TRANSFIX: {
+                        String dict_pattern = translation;
+                        String template_pattern = var.ending;
+                        String result = "";
+                        size_t dict_pos = 0;
+                        size_t temp_pos = 0;
+                        while (temp_pos < template_pattern.size() && dict_pos < dict_pattern.size()) {
+                            if (template_pattern[temp_pos] == '_') {
+                                while (dict_pos < dict_pattern.size() && dict_pattern[dict_pos] != '_') {
+                                    result += dict_pattern[dict_pos];
+                                    dict_pos++;
+                                }
+                                if (dict_pos < dict_pattern.size() && dict_pattern[dict_pos] == '_') {
+                                    dict_pos++;
+                                }
+                                temp_pos++;
+                            } else {
+                                while (dict_pos < dict_pattern.size() && dict_pattern[dict_pos] != '_') {
+                                    result += dict_pattern[dict_pos];
+                                    dict_pos++;
+                                }
+                                if (dict_pos < dict_pattern.size() && dict_pattern[dict_pos] == '_') {
+                                    result += template_pattern[temp_pos];
+                                    dict_pos++;
+                                } else {
+                                    result += template_pattern[temp_pos];
+                                }
+                                temp_pos++;
+                            }
+                        }
+                        while (temp_pos < template_pattern.size()) {
+                            if (template_pattern[temp_pos] != '_') {
+                                result += template_pattern[temp_pos];
+                            }
+                            temp_pos++;
+                        }
+                        while (dict_pos < dict_pattern.size()) {
+                            if (dict_pattern[dict_pos] != '_') {
+                                result += dict_pattern[dict_pos];
+                            }
+                            dict_pos++;
+                        }
+                        if (var.flag != 0) {
+                            flag |= var.flag;
+                        }
+                        return result;
+                    }
+                    case CIRCUMFIX: {
+                        const String& full_circumfix = affix;
+                        String delimiter = "$";
                         String pre = full_circumfix.substr(0, full_circumfix.find(delimiter));
-                            //get the suffix
                         String suf = full_circumfix.substr((full_circumfix.find(delimiter) + 1), full_circumfix.length());
-                           
-                          return pre + translation + suf; } 
-                         break;
-                            
+                        return pre + translation + suf;
                     }
                 }
             }
         }
-    
-
+    }
     return translation;
 }
-
 
 using Dictionary = Entry[];
 using VerbDictionary = Verb[];
@@ -1945,32 +1921,39 @@ String name(const char* sentence) { \
         for (size_t i = 0; i + 1 < reordered_arr.size(); ++i) { \
             auto &current = reordered_arr.at(i); \
             auto &next = reordered_arr.at(i + 1); \
-            /* nominative */ \
-            if (i > 0) { \
-                auto &previous = reordered_arr.at(i - 1); \
-                if (current.type == VERB && (previous.type == NOUN || previous.type == PRONOUN)) { \
-                    uint64_t f = lookupFlags_test(default_nouns, nouns_length, previous.word.c_str()); \
-                    CaseResult g = detect_case(current.word, FROM_CASE); \
-                    previous.translation = apply_case(previous.translation, g.matched_variation, TO_CASE, f, NOMINATIVE); \
+          /* nominative */ \
+                if (i > 0) { \
+                    auto &previous = reordered_arr.at(i - 1); \
+                    if (previous.trigger_word.empty() && \
+                        current.type == VERB && (previous.type == NOUN || previous.type == PRONOUN)) { \
+                        uint64_t f = lookupFlags_test(default_nouns, nouns_length, previous.word.c_str()); \
+                        CaseResult g = detect_case(current.word, FROM_CASE); \
+previous.translation = apply_case(previous.translation, nullptr, TO_CASE, f, NOMINATIVE);\
+                    } \
                 } \
-            } \
             /* accusative */ \
             if (current.type == VERB && (next.type == NOUN || next.type == PRONOUN)) { \
                 uint64_t f = lookupFlags_test(default_nouns, nouns_length, next.word.c_str()); \
                 CaseResult g = detect_case(current.word, FROM_CASE); \
-                next.translation = apply_case(next.translation, g.matched_variation, TO_CASE, f, ACCUSATIVE); \
+              next.translation = apply_case(next.translation, nullptr, TO_CASE, f, 2); \
             } \
         } \
-        if ((INFO_ARG)->clause_order_to == SOV) { \
-            for (size_t i = 0; i + 1 < reordered_arr.size(); ++i) { \
-                if (reordered_arr[i].type == VERB && (reordered_arr[i+1].type == NOUN || reordered_arr[i+1].type == PRONOUN)) { \
+      if ((INFO_ARG)->clause_order_to == SOV) { \
+    for (size_t i = 0; i < reordered_arr.size(); ++i) { \
+        if (reordered_arr[i].type == VERB) { \
+            /* Find the first noun after this verb */ \
+            for (size_t j = i + 1; j < reordered_arr.size(); ++j) { \
+                if (reordered_arr[j].type == NOUN || reordered_arr[j].type == PRONOUN) { \
                     Word temp = reordered_arr[i]; \
-                    reordered_arr[i] = reordered_arr[i+1]; \
-                    reordered_arr[i+1] = temp; \
+                    reordered_arr[i] = reordered_arr[j]; \
+                    reordered_arr[j] = temp; \
                     break; \
                 } \
             } \
+            break; \
         } \
+    } \
+} \
     }
 
 
@@ -2014,7 +1997,7 @@ String name(const char* sentence) { \
                                        case SUFFIX:\
                                     (ARR)[i - 1].translation = (ARR)[i].translation + affix; \
                                     break;\
-                                 }(ARR).erase((ARR).begin() + i); \
+                                 }(ARR).erase((ARR).begin() + i - 1); \
                             } \
                         } \
                     } \
@@ -2478,6 +2461,7 @@ typedef struct {
    int type;
    uint64_t orig_flags; // flags for original word, just remembered that in languages that have same linguistic features but with variation (e.g gender in portuguese and russian) we need to know the flags for both the original word and the translation to make decisions.
    uint64_t flags;
+   String trigger_word;
 } Word;
 
 struct Outcome {
@@ -3027,7 +3011,7 @@ struct TransferRule {
 
 Vector<TransferRule> transfers = {
     {
-    {"teste", "sem", "existir"}, 
+    {"a", "sem", "existir"}, 
     {"outro", "outro", "outro"}
 }
 
@@ -3169,7 +3153,7 @@ using Reorder = Vector<Word>(*)(const Vector<Word>&);
 using NounLookup = Word(*)(const String&, const Vector<String>, int);
 
 //ngram groups
-inline String unigramLookup(const Vector<String>& array_of_words,
+inline String unigramLookup(Vector<String>& array_of_words,
                                  const Vector<int>& ignore_flags, Reorder reorder_helpers = nullptr, NounLookup nounLookup = nullptr, bool non_spaced = false){
 
   Vector<Word> sentence_arr;
@@ -3181,11 +3165,12 @@ inline String unigramLookup(const Vector<String>& array_of_words,
   for(size_t i = 0; i < array_of_words.size(); ++i){
     
 Word match = nounLookup(array_of_words[i], array_of_words, i);
+array_of_words[i] = match.word; 
     switch (ignore_flags[i])
     {
     case 0:{
     match_type = match.type;
-    if(match.type == -1) match_type = 0;
+ //   if(match.type == -1) match_type = 0;
      String token = array_of_words[i];
     bool isPunct = (token.size() == 1 && (token[0] == '.' || token[0] == '!' || 
                     token[0] == '?' || token[0] == ',' || token[0] == ':' ||
@@ -3193,9 +3178,8 @@ Word match = nounLookup(array_of_words[i], array_of_words, i);
     if (isPunct) {
         match_type = -1;
     }
-         Word match_ = {array_of_words[i], match.translation, match_type, match.orig_flags, match.flags};
-        sentence_arr.push_back({match.word, match.translation ,match_type, match.orig_flags, match.flags});
-        word_arr.push_back(match_);
+       Word match_ = {match.word, match.translation, match_type, match.orig_flags, match.flags};  
+    sentence_arr.push_back({match.word, match.translation ,match_type, match.orig_flags, match.flags});    word_arr.push_back(match_);
         break;}
     case 1:{
         Word match_ = {array_of_words[i], array_of_words[i], -1, 0,0};
@@ -3588,7 +3572,7 @@ inline bool rule(
 inline bool default_multibyte = false;
 inline bool default_autoCorrect = false;
 inline unsigned int ngrams_length = 0;
-static inline Entry default_fixed_ngrams[2];
+static inline Entry default_fixed_ngrams[5];
 
 Info default_info = {
     SVO,
@@ -3731,43 +3715,87 @@ String find_relation(Word word, uint64_t requirement) {
     }
     return "";
 }
-
 static Vector<Word> default_reorderHelpers(const Vector<Word>& copy){
     Vector<Word> sentence_arr = copy;
     Vector<Word> reordered_arr;
-
     for (size_t i = 0; i < sentence_arr.size(); ++i) {
-     INIT_REORDER()
-     DEFAULT()
-     
+       INIT_REORDER()
+        DEFAULT()   // This pushes the word with marker still attached
     }
-CLEANUP(reordered_arr)
+    CLEANUP(reordered_arr)
 
-HANDLE_TRANSFERS(&default_info, reordered_arr, default_morph_to);
-
-HANDLE_CASE(&default_info, NO_CASE, &cases);
-
-Vector<Word> final_arr;
+    HANDLE_TRANSFERS(&default_info, reordered_arr, default_morph_to);
+    HANDLE_CASE(&default_info, NO_CASE, &cases);
+Vector<int> skip_indices;
 for (size_t i = 0; i < reordered_arr.size(); ++i) {
-    final_arr.push_back(reordered_arr[i]);
+    size_t pos = reordered_arr[i].word.find(PREV_MARKER);
+    if (pos != String::npos) {
+        reordered_arr[i].word = reordered_arr[i].word.substr(0, pos);
+        if (i > 0) skip_indices.push_back(i - 1);
+    }
 }
+
+// 2. Skip based on trigger_word (for pelo, etc.)
+for (size_t i = 0; i < reordered_arr.size(); ++i) {
+    if (!reordered_arr[i].trigger_word.empty()) {
+        for (size_t j = 0; j < reordered_arr.size(); ++j) {
+            if (reordered_arr[j].word == reordered_arr[i].trigger_word) {
+                skip_indices.push_back(j);
+                break;
+            }
+        }
+    }
+}
+    // 4. Build final output, skipping marked indices
+    Vector<Word> final_arr;
+    for (size_t i = 0; i < reordered_arr.size(); ++i) {
+        bool should_skip = false;
+        for (int idx : skip_indices) {
+            if (idx == i) { should_skip = true; break; }
+        }
+        if (!should_skip) final_arr.push_back(reordered_arr[i]);
+    }
     return final_arr;
 }
+
 static Word default_verb_lookup(const String& word, const Vector<String> sentence, int word_index) {
-    if (verbs_length == 0)
+  
+    static bool sanitized = false;
+    if (!sanitized) {
+        for (auto& conj : default_conjugations) {
+            if (conj.vowel_harmony != nullptr) {
+                uintptr_t addr = reinterpret_cast<uintptr_t>(conj.vowel_harmony);
+                if (addr < 0x1000 || addr > 0x7fffffffffff || 
+                    (addr >= 0x7fff00000000 && addr <= 0x7fffffffffff)) {
+                    conj.vowel_harmony = nullptr;
+                }
+            }
+        }
+        sanitized = true;
+    }
+    
+    String marked_word = word; 
+    if (word_index < 0 || word_index >= (int)sentence.size()) {
         return Word{word, word, -1, 0, 0};
+    }
+
+    if (verbs_length == 0) {
+    
+        return Word{word, word, -1, 0, 0};
+    }
 
     bool multibyte = default_multibyte;
 
     // First, check for exact matches in verb dictionary
-    Verb v = find_verb_in_array(default_verbs, verbs_length, word.c_str());
+     Verb v = find_verb_in_array(default_verbs, verbs_length, word.c_str());
     if (v.t && *v.t) {
         uint64_t verb_flags = v.flags;
-        return Word{word, normalize(v.t), VERB, 0, verb_flags};
+           return Word{word, normalize(v.t), VERB, 0, verb_flags};
     }
-
+ 
+    // MORPHOLOGY DETECTION
     if (!default_morph_from.variations.empty()) {
-        const Morph* morph_from_ptr = &(default_morph_from);
+         const Morph* morph_from_ptr = &(default_morph_from);
         const Morph* morph_to_ptr = &(default_morph_to);
         String current_word = word;
         Vector<const MorphVariation*> applied_morphs;
@@ -3777,8 +3805,11 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
         int safety = 10;
         
         while (!found_root && safety-- > 0) {
-            MorphResult p = detect_morph(current_word, morph_from_ptr, sentence, word_index);
+             MorphResult p = detect_morph(current_word, morph_from_ptr, sentence, word_index);
+            
             if (p.matched_variation != nullptr) {
+              
+                marked_word = p.root;
                 if (p.matched_variation->stackable == STACKABLE) {
                     applied_morphs.push_back(p.matched_variation);
                     current_word = p.root;
@@ -3789,7 +3820,7 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
                         flags = v.flags;
                         found_root = true;
                         break;
-                    }
+                    } 
                 } else {
                     applied_morphs.push_back(p.matched_variation);
                     Verb v = find_verb_in_array(default_verbs, verbs_length, p.root.c_str());
@@ -3797,7 +3828,7 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
                         result = v.t;
                         flags = v.flags;
                         found_root = true;
-                    }
+                           } 
                     break;
                 }
             } else {
@@ -3805,23 +3836,32 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
             }
         }
         
-        if (found_root) {
+        if (found_root && !applied_morphs.empty()) {
             String translation = result;
             for (auto it = applied_morphs.rbegin(); it != applied_morphs.rend(); ++it) {
-                translation = apply_morph(translation, *it, morph_to_ptr, flags);
-            }
-            return Word{word, normalize(translation), VERB, 0, flags};
-        }
-    }
+                   translation = apply_morph(translation, *it, morph_to_ptr, flags);
+                 }
+             return Word{marked_word, normalize(translation), VERB, 0, flags};
+        } else if (found_root && applied_morphs.empty()) {
+           } else {
+             }
+    } 
 
-    // Try suffix-stripping using verb endings ( after the general morphology has been checked, this way they can stack on verbs as well)
+    // Try suffix-stripping using verb endings
     if (!default_endings.empty() && !default_conjugations.empty()) {
+        if (default_verbs == nullptr || verbs_length == 0) {
+            return Word{word, word, -1, 0, 0};
+        }
         for (const auto& group : default_endings) {
             for (const auto& ending : group.endings) {
                 int ending_form = group.form;
                 int ending_type = group.type;
                 
+                   
                 if (ending_type == TRANSFIX) {
+                    if (default_verbs == nullptr || verbs_length == 0) {
+                        continue;
+                    }
                     for (const auto& dict_entry : default_verbs) {
                         String dict_pattern = dict_entry.w;
                         String template_pattern = ending;
@@ -3880,14 +3920,16 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
                                 temp_var.vowel_harmony = nullptr;
                                 temp_var.agreement = 0;
                                 translation = apply_morph(translation, &temp_var, morph_to_ptr, v.flags);
-                                return Word{word, normalize(translation), VERB, 0, v.flags};
+                                 return Word{word, normalize(translation), VERB, 0, v.flags};
                             }
                         }
                     }
                     continue;
                 }
                 
-                if (word.size() <= ending.size()) continue;
+                if (word.size() <= ending.size()) {
+                      continue;
+                }
                 
                 bool ends_with = false;
                 if (multibyte) {
@@ -3897,13 +3939,13 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
                     if (word.compare(word.size() - ending.size(), ending.size(), ending) == 0)
                         ends_with = true;
                 }
-                if (!ends_with) continue;
+                if (!ends_with) {
+                    continue;
+                }
 
                 String root = word.substr(0, word.size() - ending.size());
-
+               
                 Verb v = find_verb_in_array(default_verbs, verbs_length, root.c_str());
-
-                
                 if (v.t && *v.t) {
                     String translation = v.t;
                     uint64_t verb_flags = v.flags;
@@ -3913,7 +3955,6 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
 
                     for (const auto& conj : default_conjugations) {
                         if (conj.form != ending_form) continue;
-
                         bool condition_met = conj.required_ending.empty();
                         if (!conj.required_ending.empty()) {
                             if (translation.size() >= conj.required_ending.size() &&
@@ -3950,23 +3991,20 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
                             }
                             translation = stem;
                             conjugation_applied = true;
-                            break;
+                              break;
                         }
                     }
 
                     if (conjugation_applied) {
-                        return Word{word, normalize(result), VERB, 0, verb_flags};
-                    }
+                         return Word{marked_word, normalize(result), VERB, 0, verb_flags};
+                    } 
                 }
             }
         }
-    }
-
-    return Word{word, word, -1, 0, 0};
+    } 
+   return Word{marked_word, word, -1, 0, 0};
 }
-
 static Word default_nounLookup(const String& word, const Vector<String> sentence, int word_index) {
-    // Define lookup configurations: {dictionary, length, word_type}
     struct LookupConfig {
         const Entry* dict;
         unsigned int length;
@@ -3976,167 +4014,277 @@ static Word default_nounLookup(const String& word, const Vector<String> sentence
         {default_nouns, nouns_length, NOUN}
     };
     
-    // Loop through all word types
-   for (const auto& cfg : configs) {
-    if (const char* result = lookup_test(cfg.dict, cfg.length, word.c_str())) { 
-        String translation = result; 
-        int word_type = cfg.type; 
-        uint64_t word_flags = lookupFlags_test(cfg.dict, cfg.length, word.c_str());
-        return { word, normalize(translation), word_type, 0, word_flags };
+    
+    if (word_index < 0 || word_index >= (int)sentence.size()) {
+        return Word{word, word, -1, 0, 0};
     }
-}
-    int found_type = -1;
-    Word vw = default_verb_lookup(word, sentence, word_index);
-    // verbs return -1 type when no verb is matched
-    if (vw.type != -1) return vw;
 
-/* NON-CONCATENATIVE TEMPLATIC DETECTION */                              
-{                                                                   
-    const Morph* morph_from_ptr = &(default_morph_from);                   
-    for (const auto& var : morph_from_ptr->variations) {           
-        if (var.type == TRANSFIX) {
-            // Try each dictionary configuration
-            for (const auto& cfg : configs) {
-                const Entry* dict = cfg.dict;
-                size_t dict_length = cfg.length;
-                int dict_type = cfg.type;
-                
-                for (size_t i = 0; i < dict_length; i++) {
-                    const Entry& dict_entry = dict[i];
-                    String dict_pattern = dict_entry.w;
-                    String tmpl = var.ending;
-                    String reconstructed = "";
-                    size_t d = 0, t = 0;
-                    
-                    while (d < dict_pattern.size()) {
-                        if (dict_pattern[d] == '-') {
-                            if (t < tmpl.size() && tmpl[t] == '-') {
-                                /* both underscore: skip */
-                                d++;
-                                t++;
-                            } else if (t < tmpl.size()) {
-                                /* template has letter: add it */
-                                reconstructed += tmpl[t];
-                                d++;
-                                t++;
-                            } else {
-                                /* no template left: skip underscore */
-                                d++;
-                            }
-                        } else {
-                            /* consonant: add it */
-                            reconstructed += dict_pattern[d];
-                            /* if template has underscore, consume it */
-                            if (t < tmpl.size() && tmpl[t] == '-') {
-                                t++;
-                            }
-                            d++;
+    /* REGULAR MORPHOLOGICAL DETECTION (stackable suffixes) */
+    {
+        
+        const Morph* morph_from_ptr = &(default_morph_from);
+        String current_word = word;
+        Vector<const MorphVariation*> applied_morphs;
+        bool found_root = false;
+        const char* result = nullptr;
+        uint64_t flags = 0;
+        int found_type = UNKNOWN;
+        int safety = 30;
+
+        while (!found_root && safety-- > 0) {
+              
+            // FIRST: try non-stackable suffixes (es, etc.)
+            bool non_stackable_matched = false;
+            for (const auto& var : morph_from_ptr->variations) {
+                if (var.type != SUFFIX || var.stackable) continue;
+                const String& ending = var.ending;
+                const String& trigger = var.form;
+                if (ending.empty() || current_word.size() <= ending.size()) continue;
+                if (current_word.compare(current_word.size() - ending.size(), ending.size(), ending) != 0) continue;
+
+                String base = current_word.substr(0, current_word.size() - ending.size());
+                String root = base + trigger;
+
+              
+                bool root_exists = false;
+                for (const auto& cfg : configs) {
+                    if (lookup_test(cfg.dict, cfg.length, root.c_str())) {
+                        root_exists = true;
+                        break;
+                    }
+                }
+
+              if (root_exists) {
+    applied_morphs.push_back(&var);
+    current_word = root;
+    found_root = true;
+    non_stackable_matched = true;
+    
+                    // Look up translation for non-stackable root
+                    for (const auto& cfg : configs) {
+                        const char* lookup_result = lookup_test(cfg.dict, cfg.length, root.c_str());
+                        if (lookup_result) {
+                            result = lookup_result;
+                            flags = lookupFlags_test(cfg.dict, cfg.length, root.c_str());
+                            found_type = cfg.type;
+                            break;
                         }
                     }
-                    /* ignore any remaining template letters */
-                    if (reconstructed == word) {
-                        const char* result = lookup_test(dict, dict_length, dict_pattern.c_str());
-                        if (result) {
-                            uint64_t flags = lookupFlags_test(dict, dict_length, dict_pattern.c_str());
-                            String translation = result;
+                    break;
+                }
+            }
+            if (non_stackable_matched) break;
+
+            // THEN: collect ALL stackable suffixes that match the current word
+            Vector<const MorphVariation*> matching_morphs;
+            for (const auto& var : morph_from_ptr->variations) {
+                if (var.type != SUFFIX || !var.stackable) continue;
+                const String& ending = var.ending;
+                const String& trigger = var.form;
+                if (ending.empty() || current_word.size() <= ending.size()) continue;
+                if (current_word.compare(current_word.size() - ending.size(), ending.size(), ending) != 0) continue;
+                matching_morphs.push_back(&var);
+            }
+
+        
+
+            bool stripped = false;
+            for (const auto& var : matching_morphs) {
+                String base = current_word.substr(0, current_word.size() - var->ending.size());
+                String root = base + var->form;
+       
+                bool root_exists = false;
+                for (const auto& cfg : configs) {
+                    if (lookup_test(cfg.dict, cfg.length, root.c_str())) {
+                        root_exists = true;
+                        break;
+                    }
+                }
+                
+                if (root_exists) {
+                    applied_morphs.push_back(var);
+                    current_word = root;
+                    stripped = true;
+                    found_root = true; 
+                       for (const auto& cfg : configs) {
+                            const char* lookup_result = lookup_test(cfg.dict, cfg.length, root.c_str());
+                            if (lookup_result) {
+                                result = lookup_result;
+                                flags = lookupFlags_test(cfg.dict, cfg.length, root.c_str());
+                                found_type = cfg.type;
+                                break;
+                            }
+                        }
+                    break;
+                }
+            }
+
+            if (!stripped && !matching_morphs.empty()) {
+                const auto& var = matching_morphs[0];
+                String base = current_word.substr(0, current_word.size() - var->ending.size());
+                String root = base + var->form;
+                applied_morphs.push_back(var);
+                current_word = root;
+                stripped = true;
+            }
+
+            if (!stripped) {
+                 for (const auto& cfg : configs) {
+                    const char* lookup_result = lookup_test(cfg.dict, cfg.length, current_word.c_str());
+                    if (lookup_result) {
+                        result = lookup_result;
+                        flags = lookupFlags_test(cfg.dict, cfg.length, current_word.c_str());
+                        found_type = cfg.type;
+                        found_root = true;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+
+        if (found_root && !applied_morphs.empty()) {
+            
+            String translation = result ? String(result) : current_word;
+            const Morph* morph_to_ptr = &(default_morph_to);
+            for (auto it = applied_morphs.rbegin(); it != applied_morphs.rend(); ++it) {
+                translation = apply_morph(translation, *it, morph_to_ptr, flags);
+                 }
+            
+            Word result_word;
+            result_word.word = word;
+            result_word.translation = normalize(translation);
+            result_word.type = found_type;
+            result_word.flags = flags;
+            return result_word;
+        } 
+    }
+
+    /* PREV_WORD DETECTION (only for nouns, AFTER stacking) */
+    {
+         
+        bool is_verb = false;
+        Verb v = find_verb_in_array(default_verbs, verbs_length, word.c_str());
+        if (v.t && *v.t) {
+            is_verb = true;
+            }
+        
+        if (!is_verb && verbs_length > 0 && !default_endings.empty()) {
+            for (const auto& group : default_endings) {
+                for (const auto& ending : group.endings) {
+                    if (word.size() > ending.size() && 
+                        word.compare(word.size() - ending.size(), ending.size(), ending) == 0) {
+                        is_verb = true;
+                        break;
+                    }
+                }
+                if (is_verb) break;
+            }
+        }
+        
+        if (!is_verb) {
+            const Morph* morph_from_ptr = &(default_morph_from);
+            for (const auto& var : morph_from_ptr->variations) {
+                if (var.type == PREV_WORD) {
+                    if (word_index > 0 && word_index < (int)sentence.size() && 
+                        sentence[word_index - 1] == var.ending) {
+                        const char* trans = lookup_test(default_nouns, nouns_length, word.c_str());
+                        if (trans) {
+                            String translation = trans;
+                            uint64_t word_flags = lookupFlags_test(default_nouns, nouns_length, word.c_str());
                             const Morph* morph_to_ptr = &(default_morph_to);
-                            translation = apply_morph(translation, &var, morph_to_ptr, flags);
-                            return { word, normalize(translation), dict_type, 0, flags };
+                            for (const auto& target_var : morph_to_ptr->variations) {
+                                if (target_var.morphology == var.morphology) {
+                                    translation = apply_morph(translation, &target_var, morph_to_ptr, word_flags);
+                                    break;
+                                }
+                            }
+                            Word result_word;
+                            result_word.word = word + PREV_MARKER;
+                            result_word.trigger_word = sentence[word_index - 1];
+                            result_word.translation = normalize(translation);
+                            result_word.type = NOUN;
+                            result_word.flags = word_flags;
+                                  
+                            return result_word;
                         }
                     }
                 }
             }
         }
     }
-}
 
-     /* REGULAR MORPHOLOGICAL DETECTION */                              
-       {                                                                   
-        const Morph* morph_from_ptr = &(default_morph_from);               
-        String current_word = word;                               
-        Vector<const MorphVariation*> applied_morphs;             
-        bool found_root = false;                                      
-        const char* result = nullptr;                                  
-        uint64_t flags = 0;                                            
-        int found_type = UNKNOWN;  // Track the type from dictionary lookup
-        /* i'll limit it for 10 right now, but when agglutinative languages i'll inflate */ 
-        int safety = 10;                                               
-        while (!found_root && safety-- > 0) {                          
-            MorphResult p = detect_morph(current_word, morph_from_ptr, sentence, word_index); 
-            if (p.matched_variation != nullptr) {                      
-                if (p.matched_variation->stackable == STACKABLE) {     
-                    /* check if it is stackable*/                      
-                    applied_morphs.push_back(p.matched_variation);     
-                    current_word = p.root;                             
-                    /* Try lookup with stripped word */                
-                    // Check against all dictionaries
-                    for (const auto& cfg : configs) {
-                        if ((result = lookup_test(cfg.dict, cfg.length, current_word.c_str()))) {
-                            flags = lookupFlags_test(cfg.dict, cfg.length, current_word.c_str());
-                            found_type = cfg.type;
-                            
-                            // Check if morph allows this part of speech
-                            bool type_allowed = p.matched_variation->apply_only_to.empty();
-                            for (int allowed_type : p.matched_variation->apply_only_to) {
-                                if (allowed_type == found_type) {
-                                    type_allowed = true;
-                                    break;
+    // Normal noun lookup
+    for (const auto& cfg : configs) {
+        if (const char* result = lookup_test(cfg.dict, cfg.length, word.c_str())) {
+            String translation = result;
+            int word_type = cfg.type;
+            uint64_t word_flags = lookupFlags_test(cfg.dict, cfg.length, word.c_str());
+            return { word, normalize(translation), word_type, 0, word_flags };
+        }
+    }
+
+    // Verb fallback
+    Word vw = default_verb_lookup(word, sentence, word_index);
+    if (vw.type != -1) {
+        return vw;
+    }
+
+    // TRANSFIX detection
+    {
+        const Morph* morph_from_ptr = &(default_morph_from);
+        for (const auto& var : morph_from_ptr->variations) {
+            if (var.type == TRANSFIX) {
+                for (const auto& cfg : configs) {
+                    const Entry* dict = cfg.dict;
+                    size_t dict_length = cfg.length;
+                    int dict_type = cfg.type;
+                    for (size_t i = 0; i < dict_length; i++) {
+                        const Entry& dict_entry = dict[i];
+                        String dict_pattern = dict_entry.w;
+                        String tmpl = var.ending;
+                        String reconstructed = "";
+                        size_t d = 0, t = 0;
+                        while (d < dict_pattern.size()) {
+                            if (dict_pattern[d] == '-') {
+                                if (t < tmpl.size() && tmpl[t] == '-') {
+                                    d++;
+                                    t++;
+                                } else if (t < tmpl.size()) {
+                                    reconstructed += tmpl[t];
+                                    d++;
+                                    t++;
+                                } else {
+                                    d++;
                                 }
+                            } else {
+                                reconstructed += dict_pattern[d];
+                                if (t < tmpl.size() && tmpl[t] == '-') {
+                                    t++;
+                                }
+                                d++;
                             }
-                            
-                            if (type_allowed) {
-                                found_root = true;
-                                break;
+                        }
+                        if (reconstructed == word) {
+                            const char* result = lookup_test(dict, dict_length, dict_pattern.c_str());
+                            if (result) {
+                                uint64_t flags = lookupFlags_test(dict, dict_length, dict_pattern.c_str());
+                                String translation = result;
+                                const Morph* morph_to_ptr = &(default_morph_to);
+                                translation = apply_morph(translation, &var, morph_to_ptr, flags);
+                                return { word, normalize(translation), dict_type, 0, flags };
                             }
                         }
                     }
-                    if (found_root) break;
-                } else {                                               
-                    /* Non-stackable, just get it and stop */          
-                    applied_morphs.push_back(p.matched_variation);     
-                    // Check against all dictionaries
-                    for (const auto& cfg : configs) {
-                        if ((result = lookup_test(cfg.dict, cfg.length, p.root.c_str()))) {
-                            flags = lookupFlags_test(cfg.dict, cfg.length,p.root.c_str());
-                            found_type = cfg.type;
-                            
-                            // Check if morph allows this part of speech
-                            bool type_allowed = p.matched_variation->apply_only_to.empty();
-                            for (int allowed_type : p.matched_variation->apply_only_to) {
-                                if (allowed_type == found_type) {
-                                    type_allowed = true;
-                                    break;
-                                }
-                            }
-                            
-                            if (type_allowed) {
-                                found_root = true;
-                                break;
-                            }
-                        }
-                    }
-                    break;
-                }                                                      
-            } else {                                                   
-                break;                                                 
-            }                                                          
-        }                                                              
-        if (found_root) {                                              
-            String translation = result;                          
-            const Morph* morph_to_ptr = &(default_morph_to);                   
-            for (auto it = applied_morphs.rbegin(); it != applied_morphs.rend(); ++it) { 
-                translation = apply_morph(translation, *it, morph_to_ptr, flags); 
-                
-            }                                               
-            return { word, normalize(translation), found_type, 0, flags };   
-        }                                                              
-    }    
+                }
+            }
+        }
+    }
 
 
-    //fallback, words with no matching at all return type -1 unchanged strings
-    return Word{ word, normalize(word), -1 };  
-
+    return Word{ word, normalize(word), -1 };
 }
+
 // mapping out how i'm gonna receive the binary file buffers to dinamically define the rules 
 // it works!!
 inline String load(const uint8_t* file, size_t size)
@@ -4407,6 +4555,7 @@ case 0xF2:
         conj.type = temp_type; // SUFFIX/PREFIX
         conj.required_ending = temp_required_ending;
         conj.affix = temp_affix;
+        conj.vowel_harmony = nullptr;
     
          default_conjugations.push_back(conj);
     }
