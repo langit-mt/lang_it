@@ -706,6 +706,20 @@ enum Position {
    ISOLATED = 6
 }; 
 
+enum StressPosition {
+    STRESS_LAST = 0,
+    STRESS_PENULT = 1,
+    STRESS_ANTEPENULT = 2,
+    STRESS_FIRST = 3,
+    STRESS_SECOND = 4,
+    STRESS_NONE = 5
+};
+
+typedef struct {
+    StressPosition position;
+    int fallback;  
+} StressRule;
+
 typedef struct {
     String string;
     String sound;
@@ -727,7 +741,10 @@ IpaRules ipa_rules[] = {
    { {"x", "j"}, ENDING, ""},
    { {"e", "æ"}, ALWAYS, ""},
    { {"e", "æ"}, ALWAYS, ""},
-   { {"u", "ɯ"}, ALWAYS, ""}
+   { {"u", "ɯ"}, ALWAYS, ""},
+   { {"o", "oʔ"}, ENDING, ""},
+   { {"n", "d"}, ALWAYS, ""},
+   { {"õg", "õŋ"}, ALWAYS, ""}
 };
 
 
@@ -2298,7 +2315,7 @@ inline WordType typeFromString(const String& s) {
 
 enum Flags : uint64_t {
     // Common grammar flags (bits 0-15)
-    ANIMATE = 1ULL << 0,
+    w = 1ULL << 0,
     NO_PLURAL = 1ULL << 1,
     IRREGULAR_PLURAL = 1ULL << 2,
     FIRST_PERSON = 1ULL << 3,
@@ -3375,6 +3392,17 @@ inline Vector<String> tokenize(const String &text) {
     return tokens;
 }
 
+StressRule stress_rules[] = {
+    {STRESS_LAST, STRESS_LAST}  // Always stress last syllable
+};
+
+Vector<String> ipa_vowels = {
+    "a", "e", "i", "o", "u", 
+    "æ", "ɯ", "ə", "ɑ", "ɔ", "ɛ", "ɪ", "ʊ",
+    "ã", "ẽ", "ĩ", "õ", "ũ", 
+    "ä", "ë", "ï", "ö", "ü"
+};
+
 // remember to wrap this around a flag to compile without or without IPA output
 
 bool rule_applies(const IpaRules& rule, const String& sentence, size_t i) {
@@ -3448,6 +3476,111 @@ void sort_rules(IpaRules rules[], size_t count) {
 }
 
 
+bool is_vowel_ipa(const String& ch) {
+    for (size_t i = 0; i < ipa_vowels.size(); i++) {
+        if (ipa_vowels[i] == ch) return true;
+    }
+    return false;
+}
+
+size_t utf8_len(unsigned char c) {
+    if ((c & 0x80) == 0) return 1;
+    if ((c & 0xE0) == 0xC0) return 2;
+    if ((c & 0xF0) == 0xE0) return 3;
+    if ((c & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
+int count_syllables(const String& word) {
+    int count = 0;
+    bool in_vowel = false;
+    size_t i = 0;
+    
+    while (i < word.length()) {
+        size_t len = utf8_len(word[i]);
+        String ch = word.substr(i, len);
+        
+        if (ch == "ˈ" || ch == "ˌ" || ch == "ʔ") {
+            i += len;
+            continue;
+        }
+        
+        if (is_vowel_ipa(ch)) {
+            if (!in_vowel) {
+                count++;
+                in_vowel = true;
+            }
+        } else {
+            in_vowel = false;
+        }
+        
+        i += len;
+    }
+    
+    return count;
+
+}
+
+String apply_stress(const String& word) {
+    Vector<size_t> syllable_starts;
+    size_t i = 0;
+    bool in_vowel = false;
+    size_t last_vowel_end = 0;  
+
+    while (i < word.length()) {
+        size_t len = utf8_len(word[i]);
+        String ch = word.substr(i, len);
+
+        if (ch == "ˈ" || ch == "ˌ" || ch == "ʔ") {
+            i += len;
+            continue;
+        }
+
+        if (is_vowel_ipa(ch)) {
+            if (!in_vowel) {
+                syllable_starts.push_back(last_vowel_end);
+                in_vowel = true;
+            }
+            i += len;
+        } else {
+            if (in_vowel) {
+                last_vowel_end = i;
+                in_vowel = false;
+            }
+            i += len;
+        }
+    }
+
+    int syl_count = (int)syllable_starts.size();
+    if (syl_count <= 1) return word;  
+
+    int target_syl = 0;
+    size_t num_stress_rules = sizeof(stress_rules) / sizeof(stress_rules[0]);
+    for (size_t r = 0; r < num_stress_rules; r++) {
+        switch (stress_rules[r].position) {
+            case STRESS_LAST:         target_syl = syl_count - 1; break;
+            case STRESS_PENULT:       target_syl = (syl_count >= 2) ? syl_count - 2 : 0; break;
+            case STRESS_ANTEPENULT:   target_syl = (syl_count >= 3) ? syl_count - 3 : 0; break;
+            case STRESS_FIRST:        target_syl = 0; break;
+            case STRESS_SECOND:       target_syl = (syl_count >= 2) ? 1 : 0; break;
+            case STRESS_NONE:         return word;
+        }
+        break;
+    }
+
+    if (target_syl < 0 || target_syl >= syl_count) target_syl = syl_count - 1;
+
+    size_t target_pos = syllable_starts[target_syl];
+    String result = "";
+    i = 0;
+    while (i < word.length()) {
+        if (i == target_pos) result += "ˈ";
+        size_t len = utf8_len(word[i]);
+        result += word.substr(i, len);
+        i += len;
+    }
+    return result;
+}
 
 String get_ipa(const String& sentence) {
     String ipa_output = "";
@@ -3482,13 +3615,14 @@ String get_ipa(const String& sentence) {
             }
         }
         
+        processed_word = apply_stress(processed_word);
+        
         if (t > 0) ipa_output += " ";
         ipa_output += processed_word;
     }
     
     return ipa_output;
 }
-
 
 inline bool isPunctuation(const String &token) {
     if (token.empty()) return false;
@@ -3709,15 +3843,18 @@ Info default_info = {
     NOUN_FIRST,
     // definiteness
     { 
+        
+       { PREV_WORD, "uma", 0, NO_VOWEL_HARMONY },
         { PREV_WORD, "as", 0, NO_VOWEL_HARMONY },
         { PREV_WORD, "os", 0, NO_VOWEL_HARMONY },
+       { PREV_WORD, "um", 0, NO_VOWEL_HARMONY },
        { PREV_WORD, "o", 0, NO_VOWEL_HARMONY },
-       { PREV_WORD, "a", 0, NO_VOWEL_HARMONY }
+       { PREV_WORD, "a", 0, NO_VOWEL_HARMONY },
     },
     { 
         { SUFFIX, "", 0, NO_VOWEL_HARMONY }
     },
-    4,
+    6,
     1,
     {0},
     {1}
