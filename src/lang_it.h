@@ -702,12 +702,13 @@ enum Position {
    ENDING = 2,
    BEFORE = 3,
    AFTER = 4,
-   BETWEEN = 4
+   BETWEEN = 5,
+   ISOLATED = 6
 }; 
 
 typedef struct {
-    const char* string;
-    const char* sound;
+    String string;
+    String sound;
 } IpaRule;
 // e.g
 //  a ALWAYS = ä, a BEGINNING = a
@@ -716,15 +717,18 @@ typedef struct {
 typedef struct {
     IpaRule rule;
     int position;
-    const char* with; 
+    String with; 
 } IpaRules;
 
 // for each module you can write a list of ipa rules
 // and i'll write a function that parses words and also allows IPA output
 IpaRules ipa_rules[] = {
-   { {"", ""}, ALWAYS, "a"}
+   { {"x", "tʃ"}, ALWAYS, ""},
+   { {"x", "j"}, ENDING, ""},
+   { {"e", "æ"}, ALWAYS, ""},
+   { {"e", "æ"}, ALWAYS, ""},
+   { {"u", "ɯ"}, ALWAYS, ""}
 };
-
 
 
 struct Verb {
@@ -3369,6 +3373,120 @@ inline Vector<String> tokenize(const String &text) {
     }
 
     return tokens;
+}
+
+// remember to wrap this around a flag to compile without or without IPA output
+
+bool rule_applies(const IpaRules& rule, const String& sentence, size_t i) {
+    size_t ruleLen = rule.rule.string.length();
+    size_t sentLen = sentence.length();
+    
+    if (i + ruleLen > sentLen) return false;
+    if (sentence.substr(i, ruleLen) != rule.rule.string) return false;
+    
+    switch(rule.position) {
+        case ALWAYS:
+            return true;
+        case BEGINNING:
+            return (i == 0);
+        case ENDING:
+            return (i + ruleLen == sentLen);
+        case ISOLATED:
+            return (i == 0 && i + ruleLen == sentLen);
+        case BEFORE: {
+            size_t contextPos = i + ruleLen;
+            if (contextPos + rule.with.length() > sentLen) return false;
+            return sentence.substr(contextPos, rule.with.length()) == rule.with;
+        }
+        case AFTER: {
+            if (i < rule.with.length()) return false;
+            size_t contextPos = i - rule.with.length();
+            return sentence.substr(contextPos, rule.with.length()) == rule.with;
+        }
+        case BETWEEN: {
+            if (rule.with.length() != 2) return false;
+            String before = rule.with.substr(0, 1);
+            String after = rule.with.substr(1, 1);
+            bool beforeMatches = (i >= before.length() && 
+                sentence.substr(i - before.length(), before.length()) == before);
+            bool afterMatches = (i + ruleLen + after.length() <= sentLen &&
+                sentence.substr(i + ruleLen, after.length()) == after);
+            return beforeMatches && afterMatches;
+        }
+        default:
+            return false;
+    }
+}
+
+void sort_rules(IpaRules rules[], size_t count) {
+    for (size_t i = 0; i < count - 1; i++) {
+        for (size_t j = 0; j < count - i - 1; j++) {
+            bool swap_needed = false;
+            
+            if (rules[j].rule.string.length() < rules[j + 1].rule.string.length()) {
+                swap_needed = true;
+            }
+            else if (rules[j].rule.string.length() == rules[j + 1].rule.string.length()) {
+                if (rules[j].position == ALWAYS && rules[j + 1].position != ALWAYS) {
+                    swap_needed = true;
+                }
+                else if (rules[j].position != ALWAYS && rules[j + 1].position == ALWAYS) {
+                    swap_needed = false;
+                }
+                else if (rules[j].position < rules[j + 1].position) {
+                    swap_needed = true;
+                }
+            }
+            
+            if (swap_needed) {
+                IpaRules temp = rules[j];
+                rules[j] = rules[j + 1];
+                rules[j + 1] = temp;
+            }
+        }
+    }
+}
+
+
+
+String get_ipa(const String& sentence) {
+    String ipa_output = "";
+    size_t num_rules = sizeof(ipa_rules) / sizeof(ipa_rules[0]);
+    
+    static bool sorted = false;
+    if (!sorted) {
+        sort_rules(ipa_rules, num_rules);
+        sorted = true;
+    }
+    
+    Vector<String> tokens = tokenize(sentence);
+    
+    for (size_t t = 0; t < tokens.size(); t++) {
+        String word = tokens[t];
+        String processed_word = "";
+        size_t i = 0;
+        
+        while (i < word.length()) {
+            bool matched = false;
+            for (size_t j = 0; j < num_rules; j++) {
+                if (rule_applies(ipa_rules[j], word, i)) {
+                    processed_word += ipa_rules[j].rule.sound;
+                    i += ipa_rules[j].rule.string.length();
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                processed_word += word[i];
+                i++;
+            }
+        }
+        
+        if (t > 0) ipa_output += " ";
+        ipa_output += processed_word;
+    }
+    
+    return ipa_output;
 }
 
 
