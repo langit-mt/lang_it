@@ -11,7 +11,7 @@
 #define MAX_VECTOR_LENGTH 20
 #define MAX_VERB_ENDINGS 12
 #define MAX_VERB_CONJUGATIONS 5
-#define MAX_ENTRIES 200
+#define MAX_ENTRIES 210
 #define MAX_NORMALIZATION_RULES 20
 
 
@@ -350,6 +350,15 @@ inline uint8_t read_byte(const uint8_t*& ptr) {
     return *ptr++;
 }
 
+uint64_t read_u64(const uint8_t*& ptr) {
+    uint64_t value = 0;
+    for (int i = 0; i < 8; ++i) {
+        value |= static_cast<uint64_t>(ptr[i]) << (i * 8);
+    }
+    ptr += 8;
+    return value;
+}
+
 
         inline AtomString read_string(const uint8_t*& ptr) {
             const char* str = reinterpret_cast<const char*>(ptr);
@@ -665,11 +674,6 @@ enum NORMALIZATION_RULES {
     } while(0)
 
 
-/* ------- GLOBAL CORE FUNCTIONS -----------
-|           all pairs use                  |  
-------------------------------------------*/
-
-
 typedef struct {
 
     String prefix;
@@ -743,8 +747,7 @@ IpaRules ipa_rules[] = {
    { {"e", "æ"}, ALWAYS, ""},
    { {"u", "ɯ"}, ALWAYS, ""},
    { {"o", "oʔ"}, ENDING, ""},
-   { {"n", "d"}, ALWAYS, ""},
-   { {"õg", "õŋ"}, ALWAYS, ""}
+   { {"g", "ŋ"}, ENDING, ""}
 };
 
 
@@ -753,6 +756,7 @@ struct Verb {
     const char* t; 
     uint64_t orig_flags;
     uint64_t flags;
+    uint64_t verb_flags;
     const char* w2; // not elegant at all, but handles multi script, so we can translate between three different scripts to other three different, like [(bopomofo, hanzi, pinyin) -> (kana, kanji, romaji)]
     const char* w3;
     const char* t2;
@@ -1417,21 +1421,25 @@ break;
     return { word, nullptr };
 }
 
-
 inline String apply_morph(
     const String& translation,
     const MorphVariation* from_var,
     const Morph* morph_to,
     uint8_t flag)
 {
-    if (!morph_to || !from_var)
+    
+    if (!morph_to || !from_var) {
+     
         return translation;
+    }
 
-    int source_morph = from_var->morphology; 
+    int source_morph = from_var->morphology;
+
     String result;
     for (const auto& var : morph_to->variations) {
-        if (var.morphology == source_morph) { 
-            const String& ending = var.ending;
+    
+        if (var.morphology == source_morph) {
+           const String& ending = var.ending;
             const String& form   = var.form;
             
             String affix = ending;
@@ -1453,7 +1461,6 @@ inline String apply_morph(
             }
             
             // DUPLICATE CHECK DISABLED - was preventing 'ax' from being added
-            // because 'nõmenax' already ends with 'ax'
             // if (!affix.empty() && translation.size() >= affix.size() &&
             //     translation.compare(translation.size() - affix.size(), affix.size(), affix) == 0) {
             //     return translation;
@@ -1469,7 +1476,7 @@ inline String apply_morph(
                     case 3: result = translation + translation + translation; break;
                     default: break;
                 }
-                return result;
+                  return result;
             }
             if (var.type == PARTIAL_REDUPLICATION_PREFIX) {
                 String pattern = var.ending;
@@ -1519,7 +1526,7 @@ inline String apply_morph(
                 if (!matchedPart.empty()) {
                     result = matchedPart + translation;
                 }
-                return result;
+               return result;
             }
             if (var.type == PARTIAL_REDUPLICATION_SUFFIX) {
                 String pattern = var.ending;
@@ -1630,10 +1637,9 @@ inline String apply_morph(
                 }
                 return result;
             }
-            else if ((form.empty() || 
+          else if (form.empty() || 
                 (translation.size() >= form.size() &&
-                translation.compare(translation.size() - form.size(), form.size(), form) == 0)) && 
-                (var.required_flags == 0 || (flag & var.required_flags) == var.required_flags)) {
+                translation.compare(translation.size() - form.size(), form.size(), form) == 0)) {
                 switch (var.type) {
                     case SUFFIX:
                         result = translation.substr(0, translation.size() - form.size());
@@ -1710,7 +1716,6 @@ inline String apply_morph(
     }
     return translation;
 }
-
 using Dictionary = Entry[];
 using VerbDictionary = Verb[];
 using SuffixDictionary = Suffix[];
@@ -1927,57 +1932,48 @@ String name(const char* sentence) { \
     return translated; \
 }
 
-#define RULE(str, ...) \
-    if (rule(str, sentence_arr, reordered_arr, i, ##__VA_ARGS__)) continue;
-
-
 #define DEFAULT()\
-             reordered_arr.push_back(Word{ sentence_arr.at(i).word, normalize(sentence_arr.at(i).translation), sentence_arr.at(i).type,    sentence_arr.at(i).orig_flags, sentence_arr.at(i).flags});\
-
-        #define DEFAULT()\
-             reordered_arr.push_back(Word{ sentence_arr.at(i).word, normalize(sentence_arr.at(i).translation), sentence_arr.at(i).type,    sentence_arr.at(i).orig_flags, sentence_arr.at(i).flags});\
+    reordered_arr.push_back(Word{ sentence_arr.at(i).word, normalize(sentence_arr.at(i).translation), sentence_arr.at(i).type,    sentence_arr.at(i).orig_flags, sentence_arr.at(i).flags, sentence_arr.at(i).trigger_word});\
 
 #define HANDLE_CASE(INFO_ARG, FROM_CASE, TO_CASE) \
     if (!reordered_arr.empty()) { \
         for (size_t i = 0; i + 1 < reordered_arr.size(); ++i) { \
             auto &current = reordered_arr.at(i); \
             auto &next = reordered_arr.at(i + 1); \
-          /* nominative */ \
-                if (i > 0) { \
-                    auto &previous = reordered_arr.at(i - 1); \
-                    if (previous.trigger_word.empty() && \
-                        current.type == VERB && (previous.type == NOUN || previous.type == PRONOUN)) { \
-                        uint64_t f = lookupFlags_test(default_nouns, nouns_length, previous.word.c_str()); \
-                        CaseResult g = detect_case(current.word, FROM_CASE); \
-previous.translation = apply_case(previous.translation, nullptr, TO_CASE, f, NOMINATIVE);\
-                    } \
+            if (i > 0) { \
+                auto &previous = reordered_arr.at(i - 1); \
+                if (previous.trigger_word.empty() && \
+                    current.type == VERB && (previous.type == NOUN || previous.type == PRONOUN)) { \
+                    uint64_t f = lookupFlags_test(default_nouns, nouns_length, previous.word.c_str()); \
+                    CaseResult g = detect_case(current.word, FROM_CASE); \
+                    previous.translation = apply_case(previous.translation, nullptr, TO_CASE, f, NOMINATIVE); \
                 } \
-            /* accusative */ \
+            } \
             if (current.type == VERB && (next.type == NOUN || next.type == PRONOUN)) { \
                 uint64_t f = lookupFlags_test(default_nouns, nouns_length, next.word.c_str()); \
                 CaseResult g = detect_case(current.word, FROM_CASE); \
-              next.translation = apply_case(next.translation, nullptr, TO_CASE, f, 2); \
+                next.translation = apply_case(next.translation, nullptr, TO_CASE, f, ACCUSATIVE); \
             } \
         } \
-      if ((INFO_ARG)->clause_order_to == SOV) { \
-    for (size_t i = 0; i < reordered_arr.size(); ++i) { \
-        if (reordered_arr[i].type == VERB) { \
-            /* Find the first noun after this verb */ \
-            for (size_t j = i + 1; j < reordered_arr.size(); ++j) { \
-                if (reordered_arr[j].type == NOUN || reordered_arr[j].type == PRONOUN) { \
-                    Word temp = reordered_arr[i]; \
-                    reordered_arr[i] = reordered_arr[j]; \
-                    reordered_arr[j] = temp; \
+        if ((INFO_ARG)->clause_order_to == SOV) { \
+            for (size_t i = 0; i < reordered_arr.size(); ++i) { \
+                if (reordered_arr[i].type == VERB) { \
+                    size_t last_noun_idx = i + 1; \
+                    for (size_t j = i + 1; j < reordered_arr.size(); ++j) { \
+                        if (reordered_arr[j].type == NOUN || reordered_arr[j].type == PRONOUN) { \
+                            last_noun_idx = j; \
+                        } \
+                    } \
+                    if (last_noun_idx > i && last_noun_idx < reordered_arr.size()) { \
+                        Word temp = reordered_arr[i]; \
+                        reordered_arr[i] = reordered_arr[last_noun_idx]; \
+                        reordered_arr[last_noun_idx] = temp; \
+                    } \
                     break; \
                 } \
             } \
-            break; \
         } \
-    } \
-} \
     }
-
-
 // have to rename this to general abstractions, sinc it doesnt handle only posession, but also adjective order, definiteness and futurally more
 #define HANDLE_TRANSFERS(INFO_ARG, ARR, MORPH_TO_OBJ) \
     do { \
@@ -1989,12 +1985,10 @@ previous.translation = apply_case(previous.translation, nullptr, TO_CASE, f, NOM
                     for (size_t i = 0; i < (ARR).size(); ++i) { \
                         if (type_from == SUFFIX) { \
                             if(endsWith((ARR)[i].word, def_from.addition)) { \
-                                 /* found */ \
                             } \
                         } \
                         if (type_from == PREFIX) { \
                             if((ARR)[i].word.substr(0, def_from.addition.length()) == def_from.addition) { \
-                                /* found */ \
                             } \
                         } \
                     } \
@@ -2018,7 +2012,8 @@ previous.translation = apply_case(previous.translation, nullptr, TO_CASE, f, NOM
                                        case SUFFIX:\
                                     (ARR)[i - 1].translation = (ARR)[i].translation + affix; \
                                     break;\
-                                 }(ARR).erase((ARR).begin() + i - 1); \
+                                 }\
+                                 (ARR).erase((ARR).begin() + i - 1); \
                             } \
                         } \
                     } \
@@ -2046,15 +2041,12 @@ previous.translation = apply_case(previous.translation, nullptr, TO_CASE, f, NOM
                 }\
               }\
         }\
-   /* Adjective-Noun Agreement Enforcement */ \
 if ((ARR).size() >= 2) { \
-            /** DEFAULT CONVERSION FROM ASYMMETRY IN DATIVE_CONST VS NON_DATIVE_CONST CONSTRUCTIONS */\
 for (size_t i = 0; i < (ARR).size(); ++i) { \
     if (i + 1 < (ARR).size() && (ARR)[i].type == PRONOUN && (ARR)[i + 1].type == VERB && ((ARR)[i + 1].flags) & DATIVE_CONST) { \
          (ARR)[i].translation = find_relation((ARR)[i], OBLIQUE); \
     } \
 }\
-    /* Quick check: is there any agreement morphology defined? */ \
     bool has_agreement_morph = false; \
     for (const auto& var : MORPH_TO_OBJ.variations) { \
         if (var.agreement == AGREEMENT) { \
@@ -2063,33 +2055,24 @@ for (size_t i = 0; i < (ARR).size(); ++i) { \
         } \
     } \
     if (has_agreement_morph) { \
-        /* create a mask for each word to track what morphologies have been applied */ \
         Vector<int> word_applied_mask((ARR).size(), 0); \
-        /* first pass: find the noun and get its flags AND applied morphologies */ \
         for (size_t i = 0; i < (ARR).size(); ++i) { \
-            /* if we find a noun */ \
             if ((ARR)[i].type == NOUN || (ARR)[i].type == PRONOUN) { \
-                /* skip if translation is empty or same as word (untranslated) */ \
                 if ((ARR)[i].translation.empty() || (ARR)[i].translation == (ARR)[i].word) { \
                     continue; \
                 } \
-                /* get all flags from this noun */ \
                 uint64_t noun_flags = (ARR)[i].flags; \
-                /* collect morphologies to apply from BOTH sources */ \
                 Vector<const MorphVariation*> morphs_to_apply; \
-                /* source 1: from noun's flags (gender, etc.) */ \
                 for (const auto& var : MORPH_TO_OBJ.variations) { \
                     if (var.agreement == AGREEMENT && (noun_flags & var.flag)) { \
                         morphs_to_apply.push_back(&var); \
                     } \
                 } \
-                /* source 2: from noun's translation suffixes (plural, etc.) */ \
                 for (const auto& var : MORPH_TO_OBJ.variations) { \
                     if (var.agreement == AGREEMENT) { \
                         if (var.type == SUFFIX) { \
                             if ((ARR)[i].translation.size() >= var.ending.size() && \
                                 (ARR)[i].translation.compare((ARR)[i].translation.size() - var.ending.size(), var.ending.size(), var.ending) == 0) { \
-                                /* avoid duplicates */ \
                                 bool already_added = false; \
                                 for (const auto& added : morphs_to_apply) { \
                                     if (added->morphology == var.morphology && added->flag == var.flag) { \
@@ -2104,9 +2087,7 @@ for (size_t i = 0; i < (ARR).size(); ++i) { \
                         } \
                     } \
                 } \
-                /* ONLY sort if we have at least 2 morphologies to apply */ \
                 if (morphs_to_apply.size() >= 2) { \
-                    /* sort so that morphologies with non-empty form (replacements) come before those with empty form (additions) */ \
                     do { \
                         size_t n = morphs_to_apply.size(); \
                         for (size_t ii = 0; ii < n - 1; ii++) { \
@@ -2114,7 +2095,6 @@ for (size_t i = 0; i < (ARR).size(); ++i) { \
                                 const MorphVariation* a = morphs_to_apply[jj]; \
                                 const MorphVariation* b = morphs_to_apply[jj + 1]; \
                                 bool swap_needed = false; \
-                                /* swap if a has empty form and b has non-empty form (move non-empty forward) */ \
                                 if (a->form.empty() && !b->form.empty()) { \
                                     swap_needed = true; \
                                 } else if (!a->form.empty() && b->form.empty()) { \
@@ -2131,15 +2111,11 @@ for (size_t i = 0; i < (ARR).size(); ++i) { \
                         } \
                     } while(0); \
                 } \
-                /* only proceed if we have morphologies to apply */ \
                 if (!morphs_to_apply.empty()) { \
-                    /* look forwards at ALL words after this noun */ \
                     for (size_t j = i + 1; j < (ARR).size(); ++j) { \
-                        /* if we find an adjective or article before this noun */ \
                         if ((ARR)[j].type == ADJECTIVE || (ARR)[j].type == ARTICLE || (ARR)[j].type == PRONOUN) { \
                             String translation = (ARR)[j].translation; \
                             for (const auto& morph : morphs_to_apply) { \
-                                /* only apply if this morphology type hasn't been applied to this word yet */ \
                                 if (!(word_applied_mask[j] & (1 << morph->morphology))) { \
                                     translation = apply_morph(translation, morph, &MORPH_TO_OBJ, 0); \
                                     word_applied_mask[j] |= (1 << morph->morphology); \
@@ -2148,13 +2124,10 @@ for (size_t i = 0; i < (ARR).size(); ++i) { \
                             (ARR)[j].translation = translation; \
                         } \
                     } \
-                    /* look backwards at ALL words before this noun */ \
                     for (int j = i - 1; j >= 0; --j) { \
-                        /* if we find an adjective or article before this noun */ \
                         if ((ARR)[j].type == ADJECTIVE || (ARR)[j].type == ARTICLE || (ARR)[j].type == PRONOUN) { \
                             String translation = (ARR)[j].translation; \
                             for (const auto& morph : morphs_to_apply) { \
-                                /* only apply if this morphology type hasn't been applied to this word yet */ \
                                 if (!(word_applied_mask[j] & (1 << morph->morphology))) { \
                                     translation = apply_morph(translation, morph, &MORPH_TO_OBJ, 0); \
                                     word_applied_mask[j] |= (1 << morph->morphology); \
@@ -2168,96 +2141,8 @@ for (size_t i = 0; i < (ARR).size(); ++i) { \
         } \
     } \
 } \
-        if ((ARR).size() >= 3) { \
-            for (int p_i = 0; p_i < (INFO_ARG)->gc_from_count; ++p_i) { \
-                GenitiveConstruction gc_from = (INFO_ARG)->gc_from[p_i]; \
-                if (gc_from.type != MIDDLE_WORD) continue; \
-                \
-                bool found = false; \
-                for (size_t i = 0; i + 2 < (ARR).size() && !found; ++i) { \
-                    if ((ARR)[i + 1].word != gc_from.addition) continue; \
-                    size_t idxA, idxB; \
-                    if (gc_from.order == POSSESSED_FIRST) { \
-                        idxA = i;      /* A is first (possessed) */ \
-                        idxB = i + 2;  /* B is last (owner) */ \
-                    } else { /* OWNER_FIRST */ \
-                        idxA = i + 2;  /* A is last (possessed) */ \
-                        idxB = i;      /* B is first (owner) */ \
-                    } \
-                    Word A = (ARR)[idxA];  /* possessed */ \
-                    Word B = (ARR)[idxB];  /* owner */ \
-                    \
-                    /* Apply target construction */ \
-                    if ((INFO_ARG)->gc_to_count == 0) break; \
-                    \
-                    /* Find the matching target construction based on flags */ \
-                    const GenitiveConstruction* matching_gc_to = nullptr; \
-                    for (int t_i = 0; t_i < (INFO_ARG)->gc_to_count; ++t_i) { \
-                        GenitiveConstruction gc_to = (INFO_ARG)->gc_to[t_i]; \
-                        /* If gc_from has a flag, match it; otherwise match the default (0) */ \
-                        if (gc_from.flags == 0) { \
-                            if (gc_to.flags == 0) { \
-                                matching_gc_to = &(INFO_ARG)->gc_to[t_i]; \
-                                break; \
-                            } \
-                        } else { \
-                            if (gc_to.flags & gc_from.flags) { \
-                                matching_gc_to = &(INFO_ARG)->gc_to[t_i]; \
-                                break; \
-                            } \
-                        } \
-                    } \
-                    \
-                    /* If no matching target found, use the first one as fallback */ \
-                    if (!matching_gc_to) { \
-                        matching_gc_to = &(INFO_ARG)->gc_to[0]; \
-                    } \
-                    \
-                    GenitiveConstruction gc_to = *matching_gc_to; \
-                    \
-                    /* Add the flag from gc_from to the possessed word */ \
-                    Word modified_possessed = A; \
-                    modified_possessed.flags |= gc_from.flags; \
-                    \
-                    /* Build replacement words according to target order */ \
-                    Vector<Word> replacement; \
-                    if (gc_to.order == POSSESSED_FIRST) { \
-                        if (gc_to.type == SUFFIX) { \
-                            /* Attach suffix directly to the possessed word */ \
-                            Word combined = modified_possessed; \
-                            combined.translation = modified_possessed.translation + gc_to.addition; \
-                            replacement.push_back(combined); \
-                            replacement.push_back(B); \
-                        } else { \
-                            replacement.push_back(modified_possessed); \
-                            replacement.push_back(Word{gc_to.addition, gc_to.addition, 5, 0, 0}); \
-                            replacement.push_back(B); \
-                        } \
-                    } else { /* OWNER_FIRST */ \
-                        if (gc_to.type == SUFFIX) { \
-                            /* Attach suffix directly to the owner word */ \
-                            Word combined = B; \
-                            combined.translation = B.translation + gc_to.addition; \
-                            replacement.push_back(combined); \
-                            replacement.push_back(modified_possessed); \
-                        } else { \
-                            replacement.push_back(B); \
-                            replacement.push_back(Word{gc_to.addition, gc_to.addition, 5, 0, 0}); \
-                            replacement.push_back(modified_possessed); \
-                        } \
-                    } \
-                    \
-                    /* Replace the three old words with the new ones */ \
-                    (ARR).erase((ARR).begin() + i, (ARR).begin() + i + 3); \
-                    (ARR).insert((ARR).begin() + i, replacement.begin(), replacement.end()); \
-                    \
-                    found = true; \
-                    break;\
-                } \
-                if (found) break;  \
-            } \
-        } \
-    } while(0)
+} while(0)
+    
 enum WordType {
     NOUN = 0,
     ADJECTIVE = 1,
@@ -2330,11 +2215,10 @@ enum Flags : uint64_t {
     PLURAL_NUMBER = 1ULL << 12,
     NUMBER = 1ULL << 13,
     OBLIQUE = 1ULL << 14,
-    NOT_SURE = 1ULL << 15,
-
-    NOT_DECIDED_0 = 1ULL << 16,
-    NOT_DECIDED_1 = 1ULL << 17,
-    NOT_DECIDED_2 = 1ULL << 18,
+    ANIMATE = 1ULL << 15,
+    AGENT = 1ULL << 16,
+    TOPIC = 1ULL << 17,
+    OBJECT = 1ULL << 18,
     NOT_DECIDED_3 = 1ULL << 19,
     NOT_DECIDED_4 = 1ULL << 20,
     NOT_DECIDED_5 = 1ULL << 21,
@@ -3031,17 +2915,34 @@ struct TransferRule {
 };
 
 Vector<TransferRule> transfers = {
-    {
-    {"a", "sem", "existir"}, 
-    {"outro", "outro", "outro"}
+  {
+    {"*3", "muito"}, 
+    {"*3", "xeka"}
 }
 
 
 };
+
+inline bool isPunctuation(const String &token) {
+    if (token.empty()) return false;
+
+    const char punct[] = ".,?!-/:;()[]{}\"'";
+
+    char first = token.front();
+    char last  = token.back();
+
+    for (size_t i = 0; i < sizeof(punct) - 1; ++i) {
+        if (first == punct[i] || last == punct[i]) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static Vector<Word> applyTransferRules(const Vector<Word>& copy) {
     Vector<Word> sentence_arr = copy;
     Vector<Word> reordered_arr;
-    
     Vector<bool> consumed(sentence_arr.size(), false);
     
     size_t i = 0;
@@ -3057,15 +2958,31 @@ static Vector<Word> applyTransferRules(const Vector<Word>& copy) {
             size_t pattern_len = rule.source_pattern.size();
             if (i + pattern_len > sentence_arr.size()) continue;
             
-            Vector<int> captured_indices;
+            Vector<int> captured_indices;   // stores original positions of captured words
             bool match_failed = false;
+            size_t captured_count = 0;      // track how many words were captured by $ (for consumption)
             
             for (size_t j = 0; j < pattern_len; ++j) {
                 const String& pattern_token = rule.source_pattern[j];
                 const Word& current_word = sentence_arr[i + j];
                 
-                if (pattern_token[0] == '*') {
-                    // Parse "*3&2&4" -> type=3, flags={2,4}
+                if (pattern_token == "$") {
+                    // Capture all remaining words until punctuation (or end of sentence idk)
+                    size_t pos = i + j;
+                    while (pos < sentence_arr.size() && !consumed[pos] && !isPunctuation(sentence_arr[pos].word)) {
+                        captured_indices.push_back(pos);
+                        pos++;
+                    }
+                    if (captured_indices.empty()) {
+                        match_failed = true;
+                        break;
+                    }
+                    captured_count = captured_indices.size();
+                    // $ is always the last token; break out
+                    break;
+                }
+                // handle typed wildcard *type&flags 
+                else if (pattern_token[0] == '*') {
                     size_t amp_pos = pattern_token.find('&');
                     int required_type;
                     Vector<uint64_t> required_flags;
@@ -3103,63 +3020,92 @@ static Vector<Word> applyTransferRules(const Vector<Word>& copy) {
                         required_type = string_to_int(type_str);
                     }
                     
+                    // Check type
                     if (current_word.type != required_type) {
                         match_failed = true;
                         break;
                     }
-                    
+                    // Check flags
                     for (uint64_t required_flag : required_flags) {
                         if ((current_word.flags & required_flag) == 0) {
                             match_failed = true;
                             break;
                         }
                     }
+                    if (match_failed) break;
                     
-                    if (!match_failed) {
-                        captured_indices.push_back(i + j);
-                    }
-                } else {
+                    // capture this word
+                    captured_indices.push_back(i + j);
+                }
+                // hndle literal match
+                else {
                     if (current_word.word != pattern_token) {
                         match_failed = true;
                         break;
                     }
+                    // Literals are not captured; they are just checked
                 }
             }
             
-            if (!match_failed) {
+            // If pattern matched and we captured at least one wildcard
+            if (!match_failed && !captured_indices.empty()) {
+                // process target pattern 
                 for (const String& target_token : rule.target_pattern) {
-                    if (target_token[0] == '*') {
-                        String pos_str = target_token.substr(1);
-                        if (pos_str.empty()) {
-                            // Invalid target wildcard
-                            continue;
+                    if (target_token == "$") {
+                        // Insert all captured words (in capture order)
+                        for (int idx : captured_indices) {
+                            reordered_arr.push_back(sentence_arr[idx]);
                         }
-                        int source_position = string_to_int(pos_str);
-                        int original_pos = i + source_position;
-                        if (original_pos >= 0 && original_pos < (int)sentence_arr.size()) {
-                            reordered_arr.push_back(sentence_arr[original_pos]);
+                    }
+                    else if (target_token[0] == '*') {
+                        // Target wildcard: extract the type number and find the captured word with that type
+                        String type_str = target_token.substr(1);
+                        if (type_str.empty()) continue;
+                        int required_type = string_to_int(type_str);
+                        
+                        // Search for a captured word with this type
+                        bool found = false;
+                        for (size_t k = 0; k < captured_indices.size(); ++k) {
+                            int pos = captured_indices[k];
+                            if (sentence_arr[pos].type == required_type) {
+                                reordered_arr.push_back(sentence_arr[pos]);
+                                found = true;
+                                break;
+                            }
                         }
-                    } else {
+                        // If not found, skip (no output)
+                    }
+                    else {
+                        // Literal token in target
                         Word new_word;
                         new_word.word = target_token;
                         new_word.translation = target_token;
                         new_word.type = -1;
                         new_word.flags = 0;
+                        new_word.trigger_word = "";
                         reordered_arr.push_back(new_word);
                     }
                 }
                 
-                for (size_t j = 0; j < pattern_len; ++j) {
+                // If pattern had $, it consumed more than pattern_len words
+                size_t total_consumed = pattern_len;
+                if (captured_count > 0) {
+                    total_consumed = captured_indices.size();  // $ captured variable number
+                }
+                
+                // Mark all words that matched the pattern as consumed
+                for (size_t j = 0; j < total_consumed; ++j) {
                     consumed[i + j] = true;
                 }
                 
                 matched = true;
-                i += pattern_len;
+                i += total_consumed;  // skip all consumed words
                 break;
             }
         }
         
         if (!matched) {
+            // No rule matched: keep the current word as-is
             reordered_arr.push_back(sentence_arr[i]);
             ++i;
         }
@@ -3168,70 +3114,748 @@ static Vector<Word> applyTransferRules(const Vector<Word>& copy) {
     return reordered_arr;
 }
 
-// all the lookups
 
+// New rule structure for morphophonological rules
+struct MorphRule {
+    Vector<String> source_pattern;     // Pattern to match (like transfer rules)
+    Vector<String> target_pattern;     // Target with modifications
+    bool case_sensitive;              // For phonological checks
+};
+
+// Global rules
+Vector<MorphRule> morph_rules = {
+    {
+        {"*&34", "*&6*7"},    // Pattern: FREE_BIT_2, then NEUTER
+        {"*&6*7", "*&34"}     // Target: NEUTER, then FREE_BIT_2 (SWAP!)
+    }
+};
+
+
+
+struct PatternCondition {
+    enum Type {
+        COND_NONE,
+        COND_STARTS_VOWEL,
+        COND_STARTS_CONSONANT,
+        COND_ENDS_VOWEL,
+        COND_ENDS_CONSONANT,
+        COND_CONTAINS_VOWEL,
+        COND_CONTAINS_CONSONANT,
+        COND_STARTS_WITH,
+        COND_ENDS_WITH,
+        COND_CONTAINS
+    };
+    Type type;
+    char specific_char;
+};
+void parseTargetToken(const String& token, Vector<int>& types, uint64_t& flags, bool& any_type) {
+    types.clear();
+    flags = 0;
+    any_type = false;
+    
+    if (token == "*") {
+        any_type = true;
+        return;
+    }
+    
+    String remaining = token.substr(1);
+    
+    // Remove modifications
+    size_t mod_pos = remaining.find_first_of("+-/~");
+    if (mod_pos != String::npos) {
+        remaining = remaining.substr(0, mod_pos);
+    }
+    
+    // Parse flags first
+    size_t flag_pos = remaining.find('&');
+    if (flag_pos != String::npos) {
+        size_t pos = flag_pos;
+        while (pos != String::npos && pos + 1 < remaining.size()) {
+            size_t next = remaining.find('&', pos + 1);
+            String flag_str = (next != String::npos) ? remaining.substr(pos + 1, next - pos - 1) : remaining.substr(pos + 1);
+            if (!flag_str.empty()) {
+                int flag_bit = string_to_int(flag_str);
+                flags |= (1ULL << flag_bit);
+            }
+            pos = next;
+        }
+        remaining = remaining.substr(0, flag_pos);
+    }
+    
+    // Parse types
+    if (remaining.empty()) {
+        any_type = true;
+    } else {
+        size_t start = 0;
+        while (start < remaining.size()) {
+            size_t end = remaining.find('*', start);
+            String type_str = (end != String::npos) ? remaining.substr(start, end - start) : remaining.substr(start);
+            if (!type_str.empty()) {
+                types.push_back(string_to_int(type_str));
+            }
+            start = (end != String::npos) ? end + 1 : remaining.size();
+        }
+        any_type = false;
+    }
+}
+
+// Parse condition from string like "^V", "$C", "{a}"
+PatternCondition parseCondition(const String& cond_str) {
+    PatternCondition cond;
+    cond.type = PatternCondition::COND_NONE;
+    cond.specific_char = '\0';
+    
+    if (cond_str.empty()) return cond;
+    
+    // Check for ^ (starts with)
+    if (cond_str[0] == '^' && cond_str.size() > 1) {
+        char marker = cond_str[1];
+        if (marker == 'V') {
+            cond.type = PatternCondition::COND_STARTS_VOWEL;
+        } else if (marker == 'C') {
+            cond.type = PatternCondition::COND_STARTS_CONSONANT;
+        } else if (isalpha(marker)) {
+            cond.type = PatternCondition::COND_STARTS_WITH;
+            cond.specific_char = tolower(marker);
+        }
+        return cond;
+    }
+    
+    // Check for $ (ends with)
+    if (cond_str[0] == '$' && cond_str.size() > 1) {
+        char marker = cond_str[1];
+        if (marker == 'V') {
+            cond.type = PatternCondition::COND_ENDS_VOWEL;
+        } else if (marker == 'C') {
+            cond.type = PatternCondition::COND_ENDS_CONSONANT;
+        } else if (isalpha(marker)) {
+            cond.type = PatternCondition::COND_ENDS_WITH;
+            cond.specific_char = tolower(marker);
+        }
+        return cond;
+    }
+    
+    // Check for { } (contains)
+    if (cond_str[0] == '{' && cond_str.size() > 2 && cond_str[2] == '}') {
+        char marker = cond_str[1];
+        if (marker == 'V') {
+            cond.type = PatternCondition::COND_CONTAINS_VOWEL;
+        } else if (marker == 'C') {
+            cond.type = PatternCondition::COND_CONTAINS_CONSONANT;
+        } else if (isalpha(marker)) {
+            cond.type = PatternCondition::COND_CONTAINS;
+            cond.specific_char = tolower(marker);
+        }
+        return cond;
+    }
+    
+    return cond;
+}
+
+struct PatternToken {
+    Vector<int> types;          // Allowed types (OR logic)
+    uint64_t required_flags;    // Flags that must be set (AND logic)
+    PatternCondition cond;      // Phonological condition
+    bool any_type;
+};
+
+void parsePatternToken(const String& token, PatternToken& result) {
+    result.types.clear();
+    result.required_flags = 0;
+    result.cond.type = PatternCondition::COND_NONE;
+    result.cond.specific_char = '\0';
+    result.any_type = false;
+    
+    if (token == "*") {
+        result.any_type = true;
+        return;
+    }
+    
+    // Remove leading '*'
+    String remaining = token.substr(1);
+    
+    // Find where conditions start (^, $, {) or flags (&)
+    size_t cond_pos = remaining.find_first_of("^${");
+    size_t flag_pos = remaining.find('&');
+    size_t type_end = remaining.size();
+    
+    if (cond_pos != String::npos && cond_pos < type_end) type_end = cond_pos;
+    if (flag_pos != String::npos && flag_pos < type_end) type_end = flag_pos;
+    
+    // Parse types (e.g., "3*9" -> types 3 and 9)
+    String type_part = remaining.substr(0, type_end);
+    if (type_part.empty()) {
+        result.any_type = true;
+    } else {
+        size_t start = 0;
+        while (start < type_part.size()) {
+            size_t end = type_part.find('*', start);
+            String type_str;
+            if (end != String::npos) {
+                type_str = type_part.substr(start, end - start);
+                start = end + 1;
+            } else {
+                type_str = type_part.substr(start);
+                start = type_part.size();
+            }
+            if (!type_str.empty()) {
+                result.types.push_back(string_to_int(type_str));
+            }
+        }
+        result.any_type = false;
+    }
+    
+    // Parse flags (&1&2&3)
+    size_t pos = flag_pos;
+    while (pos != String::npos && pos + 1 < remaining.size()) {
+        size_t next = remaining.find('&', pos + 1);
+        String flag_str;
+        if (next != String::npos) {
+            flag_str = remaining.substr(pos + 1, next - pos - 1);
+            pos = next;
+        } else {
+            flag_str = remaining.substr(pos + 1);
+            pos = String::npos;
+        }
+        if (!flag_str.empty()) {
+            int flag_bit = string_to_int(flag_str);
+            result.required_flags |= (1ULL << flag_bit);
+        }
+    }
+    
+    // Parse condition (^, $, {})
+    if (cond_pos != String::npos) {
+        String cond_str = remaining.substr(cond_pos);
+        result.cond = parseCondition(cond_str);
+    }
+}
+
+// ============================================================
+// PHONOLOGICAL HELPER FUNCTIONS
+// ============================================================
+
+inline bool endsWithVowel(const String& word) {
+    if (word.empty()) return false;
+    char last = tolower(word[word.length() - 1]);
+    return last == 'a' || last == 'e' || last == 'i' || last == 'o' || last == 'u' ||
+           last == 'á' || last == 'é' || last == 'í' || last == 'ó' || last == 'ú' ||
+           last == 'ã' || last == 'õ' || last == 'â' || last == 'ê' || last == 'ô';
+}
+
+inline bool endsWithConsonant(const String& word) {
+    if (word.empty()) return false;
+    return !endsWithVowel(word) && isalpha(word[word.length() - 1]);
+}
+
+inline bool startsWithVowel(const String& word) {
+    if (word.empty()) return false;
+    char first = tolower(word[0]);
+    return first == 'a' || first == 'e' || first == 'i' || first == 'o' || first == 'u' ||
+           first == 'á' || first == 'é' || first == 'í' || first == 'ó' || first == 'ú' ||
+           first == 'ã' || first == 'õ' || first == 'â' || first == 'ê' || first == 'ô';
+}
+
+inline bool startsWithConsonant(const String& word) {
+    if (word.empty()) return false;
+    return !startsWithVowel(word) && isalpha(word[0]);
+}
+
+inline bool containsVowel(const String& word) {
+    for (char c : word) {
+        char lower = tolower(c);
+        if (lower == 'a' || lower == 'e' || lower == 'i' || lower == 'o' || lower == 'u' ||
+            lower == 'á' || lower == 'é' || lower == 'í' || lower == 'ó' || lower == 'ú' ||
+            lower == 'ã' || lower == 'õ' || lower == 'â' || lower == 'ê' || lower == 'ô') {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool containsConsonant(const String& word) {
+    for (char c : word) {
+        if (isalpha(c)) {
+            char lower = tolower(c);
+            if (!(lower == 'a' || lower == 'e' || lower == 'i' || lower == 'o' || lower == 'u' ||
+                  lower == 'á' || lower == 'é' || lower == 'í' || lower == 'ó' || lower == 'ú' ||
+                  lower == 'ã' || lower == 'õ' || lower == 'â' || lower == 'ê' || lower == 'ô')) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+inline bool matchesCondition(const Word& word, const PatternCondition& cond) {
+    const String& text = word.translation;
+    if (text.empty()) return false;
+    
+    switch (cond.type) {
+        case PatternCondition::COND_STARTS_VOWEL:
+            return startsWithVowel(text);
+        case PatternCondition::COND_STARTS_CONSONANT:
+            return startsWithConsonant(text);
+        case PatternCondition::COND_ENDS_VOWEL:
+            return endsWithVowel(text);
+        case PatternCondition::COND_ENDS_CONSONANT:
+            return endsWithConsonant(text);
+        case PatternCondition::COND_CONTAINS_VOWEL:
+            return containsVowel(text);
+        case PatternCondition::COND_CONTAINS_CONSONANT:
+            return containsConsonant(text);
+        case PatternCondition::COND_STARTS_WITH:
+            return !text.empty() && tolower(text[0]) == cond.specific_char;
+        case PatternCondition::COND_ENDS_WITH:
+            return !text.empty() && tolower(text[text.length()-1]) == cond.specific_char;
+        case PatternCondition::COND_CONTAINS:
+            for (char c : text) {
+                if (tolower(c) == cond.specific_char) return true;
+            }
+            return false;
+        default:
+            return true;
+    }
+}
+
+// ============================================================
+// TARGET MODIFICATION PARSING
+// ============================================================
+
+struct TargetModification {
+    enum Type {
+        MOD_NONE,
+        MOD_APPEND,
+        MOD_PREPEND,
+        MOD_REPLACE,
+        MOD_DELETE
+    };
+    Type type;
+    String text;
+    String search;
+};
+// Helper functions
+// Parse pattern token with types, flags, and conditions
+void parsePatternTokenFull(const String& token, Vector<int>& types, uint64_t& flags, PatternCondition& cond, bool& any_type) {
+    types.clear();
+    flags = 0;
+    cond.type = PatternCondition::COND_NONE;
+    cond.specific_char = '\0';
+    any_type = false;
+    
+    if (token == "*") {
+        any_type = true;
+        return;
+    }
+    
+    String remaining = token.substr(1);
+    
+    size_t cond_pos = remaining.find_first_of("^${");
+    size_t flag_pos = remaining.find('&');
+    size_t type_end = remaining.size();
+    
+    if (cond_pos != String::npos && cond_pos < type_end) type_end = cond_pos;
+    if (flag_pos != String::npos && flag_pos < type_end) type_end = flag_pos;
+    
+    // Parse types
+    String type_part = remaining.substr(0, type_end);
+    if (type_part.empty()) {
+        any_type = true;
+    } else {
+        size_t start = 0;
+        while (start < type_part.size()) {
+            size_t end = type_part.find('*', start);
+            String type_str = (end != String::npos) ? type_part.substr(start, end - start) : type_part.substr(start);
+            if (!type_str.empty()) {
+                types.push_back(string_to_int(type_str));
+            }
+            start = (end != String::npos) ? end + 1 : type_part.size();
+        }
+        any_type = false;
+    }
+    
+    // Parse flags
+    size_t pos = flag_pos;
+    while (pos != String::npos && pos + 1 < remaining.size()) {
+        size_t next = remaining.find('&', pos + 1);
+        String flag_str = (next != String::npos) ? remaining.substr(pos + 1, next - pos - 1) : remaining.substr(pos + 1);
+        if (!flag_str.empty()) {
+            int flag_bit = string_to_int(flag_str);
+            flags |= (1ULL << flag_bit);
+        }
+        pos = next;
+    }
+    
+    // Parse condition
+    if (cond_pos != String::npos) {
+        String cond_str = remaining.substr(cond_pos);
+        cond = parseCondition(cond_str);
+    }
+}
+
+TargetModification parseModification(const String& token) {
+    TargetModification mod;
+    mod.type = TargetModification::MOD_NONE;
+    
+    // Remove leading '*' and type part
+    size_t mod_pos = token.find_first_of("+-/~");
+    if (mod_pos == String::npos) return mod;
+    
+    String mod_str = token.substr(mod_pos);
+    
+    // Check for + (append)
+    if (mod_str[0] == '+' && mod_str.size() > 1) {
+        mod.type = TargetModification::MOD_APPEND;
+        mod.text = mod_str.substr(1);
+        return mod;
+    }
+    
+    // Check for - (delete suffix)
+    if (mod_str[0] == '-' && mod_str.size() > 1) {
+        mod.type = TargetModification::MOD_DELETE;
+        mod.text = mod_str.substr(1);
+        return mod;
+    }
+    
+    // Check for / (replace)
+    if (mod_str[0] == '/') {
+        size_t pos1 = mod_str.find('/', 1);
+        if (pos1 != String::npos && pos1 + 1 < mod_str.size()) {
+            size_t pos2 = mod_str.find('/', pos1 + 1);
+            if (pos2 != String::npos && pos2 + 1 < mod_str.size()) {
+                mod.type = TargetModification::MOD_REPLACE;
+                mod.search = mod_str.substr(1, pos1 - 1);
+                mod.text = mod_str.substr(pos1 + 1, pos2 - pos1 - 1);
+                return mod;
+            }
+        }
+        return mod;
+    }
+    
+    // Check for ~ (delete entire word)
+    if (mod_str[0] == '~') {
+        mod.type = TargetModification::MOD_DELETE;
+        mod.text = "";
+        return mod;
+    }
+    
+    return mod;
+}
+
+static String stripConditions(const String& token) {
+    if (token.empty() || token[0] != '*') return token;
+    
+    // Remove conditions (^, $, or {)
+    size_t cond_pos = token.find_first_of("^${");
+    if (cond_pos != String::npos) {
+        return token.substr(0, cond_pos);
+    }
+    return token;
+}
+
+static Vector<Word> applyMorphRules(const Vector<Word>& copy) {
+    Vector<Word> sentence_arr = copy;
+    Vector<Word> reordered_arr;
+    
+    Vector<bool> consumed(sentence_arr.size(), false);
+    
+    size_t i = 0;
+    while (i < sentence_arr.size()) {
+        if (consumed[i]) {
+            ++i;
+            continue;
+        }
+        
+        bool matched = false;
+        
+        for (size_t rule_idx = 0; rule_idx < morph_rules.size(); ++rule_idx) {
+            const auto& rule = morph_rules[rule_idx];
+            size_t pattern_len = rule.source_pattern.size();
+            if (i + pattern_len > sentence_arr.size()) continue;
+            
+         
+            
+            Vector<int> captured_indices;
+            Vector<String> captured_tokens;
+            bool match_failed = false;
+            size_t captured_count = 0;
+            
+            for (size_t j = 0; j < pattern_len; ++j) {
+                const String& pattern_token = rule.source_pattern[j];
+                const Word& current_word = sentence_arr[i + j];
+              
+                if (pattern_token == "$") {
+                  
+                    size_t pos = i + j;
+                    while (pos < sentence_arr.size() && !consumed[pos] && !isPunctuation(sentence_arr[pos].word)) {
+                        captured_indices.push_back(pos);
+                        captured_tokens.push_back(pattern_token);
+                        pos++;
+                    }
+                    if (captured_indices.empty()) {
+                       
+                        match_failed = true;
+                        break;
+                    }
+                    captured_count = captured_indices.size();
+                    break;
+                }
+                else if (pattern_token[0] == '*') {
+                    Vector<int> allowed_types;
+                    uint64_t required_flags = 0;
+                    PatternCondition cond;
+                    bool any_type = false;
+                    parsePatternTokenFull(pattern_token, allowed_types, required_flags, cond, any_type);
+                    
+                
+                    
+                    // Check type
+                    bool type_matches = any_type;
+                    if (!type_matches) {
+                        for (int allowed_type : allowed_types) {
+                            if (current_word.type == allowed_type) {
+                                type_matches = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!type_matches) {
+                        match_failed = true;
+                        break;
+                    }
+                    
+                    // Check flags
+                    bool flags_match = ((current_word.flags & required_flags) == required_flags);
+                   if (!flags_match) {
+                        match_failed = true;
+                     
+                        break;
+                    }
+                    
+                    // Check condition
+                    if (cond.type != PatternCondition::COND_NONE) {
+                        bool cond_match = matchesCondition(current_word, cond);
+                       
+                        if (!cond_match) {
+                            match_failed = true;
+                           
+                            break;
+                        }
+                    }
+                    
+                    captured_indices.push_back(i + j);
+                    captured_tokens.push_back(pattern_token);
+                
+                }
+                else {
+                    if (current_word.word != pattern_token) {
+                     
+                        match_failed = true;
+                        break;
+                    }
+                   
+                }
+            }
+            
+            if (match_failed || captured_indices.empty()) {
+             
+                continue;
+            }
+            
+             for (size_t k = 0; k < captured_indices.size(); ++k) {
+                int pos = captured_indices[k];
+            
+            }
+            
+            // Process target
+          
+            for (const String& target_token : rule.target_pattern) {
+               
+                if (target_token == "$") {
+                    for (int idx : captured_indices) {
+                        reordered_arr.push_back(sentence_arr[idx]);
+                    }
+                }
+                else if (target_token[0] == '*') {
+                    Vector<int> target_types;
+                    uint64_t target_flags = 0;
+                    bool any_type = false;
+                    parseTargetToken(target_token, target_types, target_flags, any_type);
+                    
+                
+                    
+                    bool found = false;
+                    for (size_t k = 0; k < captured_indices.size(); ++k) {
+                        int pos = captured_indices[k];
+                        const Word& word = sentence_arr[pos];
+                        
+                      
+                        // Check flags FIRST
+                        if ((word.flags & target_flags) != target_flags) {
+        
+                            continue;
+                        }
+                        
+                        // Check type
+                        bool type_matches = any_type;
+                        if (!type_matches) {
+                            for (int type : target_types) {
+                                if (word.type == type) {
+                                    type_matches = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!type_matches) {
+                            continue;
+                        }
+                        
+                        // Found it!
+                       Word new_word = word;
+                        TargetModification mod = parseModification(target_token);
+                        switch (mod.type) {
+                            case TargetModification::MOD_APPEND:
+                                new_word.translation += mod.text;
+                                new_word.word = new_word.translation;
+                                break;
+                            case TargetModification::MOD_PREPEND:
+                                new_word.translation = mod.text + new_word.translation;
+                                new_word.word = new_word.translation;
+                                break;
+                            case TargetModification::MOD_REPLACE: {
+                                size_t start = new_word.translation.find(mod.search);
+                                if (start != String::npos) {
+                                    new_word.translation.replace(start, mod.search.size(), mod.text);
+                                    new_word.word = new_word.translation;
+                                }
+                                break;
+                            }
+                            case TargetModification::MOD_DELETE: {
+                                if (!mod.text.empty()) {
+                                    if (new_word.translation.size() >= mod.text.size() &&
+                                        new_word.translation.substr(new_word.translation.size() - mod.text.size()) == mod.text) {
+                                        new_word.translation = new_word.translation.substr(0, new_word.translation.size() - mod.text.size());
+                                        new_word.word = new_word.translation;
+                                    }
+                                }
+                                break;
+                            }
+                            default:
+                                break;
+                        }
+                        reordered_arr.push_back(new_word);
+                        found = true;
+                        break;
+                    }
+                    
+                }
+                else {
+              
+                    Word new_word;
+                    new_word.word = target_token;
+                    new_word.translation = target_token;
+                    new_word.type = -1;
+                    new_word.flags = 0;
+                    new_word.trigger_word = "";
+                    reordered_arr.push_back(new_word);
+                }
+            }
+            
+            size_t total_consumed = (captured_count > 0) ? captured_indices.size() : pattern_len;
+         
+            for (size_t j = 0; j < total_consumed; ++j) {
+                consumed[i + j] = true;
+            }
+            
+            matched = true;
+            i += total_consumed;
+            break;
+        }
+        
+        if (!matched) {
+            reordered_arr.push_back(sentence_arr[i]);
+            ++i;
+        }
+    }
+    
+    for (size_t idx = 0; idx < reordered_arr.size(); ++idx) {
+     
+    }
+    
+    return reordered_arr;
+}
+
+// all the lookups
 using Reorder = Vector<Word>(*)(const Vector<Word>&);
 using NounLookup = Word(*)(const String&, const Vector<String>, int);
 
 //ngram groups
 inline String unigramLookup(Vector<String>& array_of_words,
-                                 const Vector<int>& ignore_flags, Reorder reorder_helpers = nullptr, NounLookup nounLookup = nullptr, bool non_spaced = false){
+                            const Vector<int>& ignore_flags, Reorder reorder_helpers = nullptr, NounLookup nounLookup = nullptr, bool non_spaced = false){
 
-  Vector<Word> sentence_arr;
-  Vector<Word> word_arr;
+    Vector<Word> sentence_arr;
+    Vector<Word> word_arr;
 
-  int match_type;
-  String sentence;
-  
-  for(size_t i = 0; i < array_of_words.size(); ++i){
+    int match_type;
+    String sentence;
     
-Word match = nounLookup(array_of_words[i], array_of_words, i);
-array_of_words[i] = match.word; 
-    switch (ignore_flags[i])
-    {
-    case 0:{
-    match_type = match.type;
- //   if(match.type == -1) match_type = 0;
-     String token = array_of_words[i];
-    bool isPunct = (token.size() == 1 && (token[0] == '.' || token[0] == '!' || 
-                    token[0] == '?' || token[0] == ',' || token[0] == ':' ||
-                    token[0] == ';' || token[0] == '(' || token[0] == ')'));
-    if (isPunct) {
-        match_type = -1;
+    for(size_t i = 0; i < array_of_words.size(); ++i){
+        if (array_of_words[i].find(PREV_MARKER) != String::npos) {
+            Word match_ = {array_of_words[i], array_of_words[i], -1, 0, 0, ""};
+            sentence_arr.push_back({array_of_words[i], array_of_words[i], -1, 0, 0, ""});
+            word_arr.push_back(match_);
+            continue;
+        }
+        
+        Word match = nounLookup(array_of_words[i], array_of_words, i);
+
+        array_of_words[i] = match.word; 
+        
+        switch (ignore_flags[i]) {
+            case 0: {
+                 match_type = match.type;
+                if(match.type == -1) match_type = 0;
+                String token = array_of_words[i];
+                bool isPunct = (token.size() == 1 && (token[0] == '.' || token[0] == '!' || 
+                                token[0] == '?' || token[0] == ',' || token[0] == ':' ||
+                                token[0] == ';' || token[0] == '(' || token[0] == ')'));
+                if (isPunct) {
+                    match_type = -1;
+                }
+                Word match_ = match;
+                match_.type = match_type;
+                sentence_arr.push_back(match_);
+                word_arr.push_back(match_);
+                break;
+            }
+            case 1: {
+                Word match_ = {array_of_words[i], array_of_words[i], -1, 0, 0, ""};
+                sentence_arr.push_back({array_of_words[i], array_of_words[i], -1, 0, 0, ""});
+                word_arr.push_back(match_);
+                break;
+            }
+            default:
+                 break;
+        }
     }
-       Word match_ = {match.word, match.translation, match_type, match.orig_flags, match.flags};  
-    sentence_arr.push_back({match.word, match.translation ,match_type, match.orig_flags, match.flags});    word_arr.push_back(match_);
-        break;}
-    case 1:{
-        Word match_ = {array_of_words[i], array_of_words[i], -1, 0,0};
-       sentence_arr.push_back({array_of_words[i], array_of_words[i],-1, 0,0});
-         word_arr.push_back(match_);
-       break;}
-    default:
-      break;
-    }
-  }
-if(word_arr.size() > 0) {
-   
-    if(transfers.size() > 0) sentence_arr = applyTransferRules(word_arr);
-    sentence_arr = reorder_helpers(sentence_arr);
-}
+    
+    if(word_arr.size() > 0) {
   
- for (size_t i = 0; i < sentence_arr.size(); ++i) {
-    const String& token = sentence_arr.at(i).translation;
-
-    char firstChar = token.empty() ? '\0' : token[0];
-    bool isPunctuation = (firstChar == '?' || firstChar == '!' || 
-                          firstChar == '.' || firstChar == ','
-                          || firstChar == '-' || firstChar == '/' || firstChar == ':');
-
-    if (!sentence.empty() && !isPunctuation && !non_spaced) {
-     sentence += " ";
+        if(transfers.size() > 0) sentence_arr = applyTransferRules(word_arr);
+        sentence_arr = reorder_helpers(sentence_arr);
     }
-
-    sentence += token;
-}
-  return sentence;
+    
+    for (size_t i = 0; i < sentence_arr.size(); ++i) {
+        const String& token = sentence_arr.at(i).translation;
+        char firstChar = token.empty() ? '\0' : token[0];
+        bool isPunctuation = (firstChar == '?' || firstChar == '!' || 
+                              firstChar == '.' || firstChar == ',' ||
+                              firstChar == '-' || firstChar == '/' || firstChar == ':');
+        if (!sentence.empty() && !isPunctuation && !non_spaced) {
+            sentence += " ";
+        }
+        sentence += token;
+    }
+    return sentence;
 }
 
 template <size_t N>
@@ -3624,22 +4248,7 @@ String get_ipa(const String& sentence) {
     return ipa_output;
 }
 
-inline bool isPunctuation(const String &token) {
-    if (token.empty()) return false;
 
-    const char punct[] = ".,?!-/:;()[]{}\"'";
-
-    char first = token.front();
-    char last  = token.back();
-
-    for (size_t i = 0; i < sizeof(punct) - 1; ++i) {
-        if (first == punct[i] || last == punct[i]) {
-            return true;
-        }
-    }
-
-    return false;
-}
 
 
 inline uint32_t next_utf8_char(const String& s, size_t& i) {
@@ -3734,89 +4343,6 @@ inline auto lookupFunction(const char* query)
 
 
 
-}
-
-
-
-
-inline bool rule(
-       const String& rule,
-    const Vector<Word>& sentence_arr,
-    Vector<Word>& reordered_arr,
-    int i,
-    const char* action_arg = nullptr 
-) {
-    Vector<String> t = parser(rule);
-    if (t.size() < 6) return false;
-    if (t[0] != "IF") return false;
-
-    String A_str = t[1];
-    WordType A = typeFromString(A_str);
-
-    if (t[2] != "THEN") return false;
-
-    struct Matcher { bool isType; WordType type; String literal; };
-    Vector<Matcher> Bs;
-
-    int idx = 3;
-    {
-        WordType wt = typeFromString(t[idx]);
-        if (wt == WordType::UNKNOWN)
-            Bs.push_back({ false, WordType::UNKNOWN, t[idx] });
-        else
-            Bs.push_back({ true, wt, "" });
-        idx++;
-    }
-
-    while (idx < (int)t.size() && t[idx] == "OR") {
-        idx++;
-        WordType wt = typeFromString(t[idx]);
-        if (wt == WordType::UNKNOWN)
-            Bs.push_back({ false, WordType::UNKNOWN, t[idx] });
-        else
-            Bs.push_back({ true, wt, "" });
-        idx++;
-    }
-
-    Vector<String> actions;
-    while (idx < (int)t.size()) {
-        if (t[idx] == "DO") {
-            idx++;
-            if (idx < (int)t.size()) actions.push_back(t[idx]);
-            idx++;
-        }
-        else idx++;
-    }
-
-    if (actions.empty()) return false;
-    if (i < 1) return false;
-
-    WordType type_prev = static_cast<WordType>(sentence_arr[i - 1].type);
-    WordType type_curr = static_cast<WordType>(sentence_arr[i].type);
-
-    String word_curr = sentence_arr[i].word;
-
-    if (type_prev != A) return false;
-
-    bool matchesB = false;
-    for (auto& m : Bs) {
-        if (m.isType) {
-            if (m.type == type_curr) { matchesB = true; break; }
-        }
-        else {
-            if (m.literal == word_curr) { matchesB = true; break; }
-        }
-    }
-
-    if (!matchesB) return false;
-
-    for (auto& act : actions) {
-        auto func = lookupFunction(act.c_str());
-        if (func)
-            func(reordered_arr, sentence_arr[i], sentence_arr[i - 1], action_arg);
-    }
-
-    return true;
 }
 
 
@@ -3973,46 +4499,82 @@ String find_relation(Word word, uint64_t requirement) {
 static Vector<Word> default_reorderHelpers(const Vector<Word>& copy){
     Vector<Word> sentence_arr = copy;
     Vector<Word> reordered_arr;
+    Vector<int> skip_indices;
+    const String PREV_MARKER = "\u200B";
+
     for (size_t i = 0; i < sentence_arr.size(); ++i) {
-       INIT_REORDER()
-        DEFAULT()   // This pushes the word with marker still attached
+        INIT_REORDER()
+        DEFAULT()
     }
     CLEANUP(reordered_arr)
 
     HANDLE_TRANSFERS(&default_info, reordered_arr, default_morph_to);
     HANDLE_CASE(&default_info, NO_CASE, &cases);
-Vector<int> skip_indices;
-for (size_t i = 0; i < reordered_arr.size(); ++i) {
-    size_t pos = reordered_arr[i].word.find(PREV_MARKER);
-    if (pos != String::npos) {
-        reordered_arr[i].word = reordered_arr[i].word.substr(0, pos);
-        if (i > 0) skip_indices.push_back(i - 1);
-    }
-}
 
-// 2. Skip based on trigger_word (for pelo, etc.)
-for (size_t i = 0; i < reordered_arr.size(); ++i) {
-    if (!reordered_arr[i].trigger_word.empty()) {
-        for (size_t j = 0; j < reordered_arr.size(); ++j) {
-            if (reordered_arr[j].word == reordered_arr[i].trigger_word) {
-                skip_indices.push_back(j);
-                break;
+    // Preserve the verb if it was removed
+    bool has_verb = false;
+    for (size_t i = 0; i < reordered_arr.size(); ++i) {
+        if (reordered_arr[i].type == VERB && !reordered_arr[i].translation.empty()) {
+            has_verb = true;
+            break;
+        }
+    }
+    if (!has_verb) {
+        for (size_t i = 0; i < sentence_arr.size(); ++i) {
+            if (sentence_arr[i].type == VERB && !sentence_arr[i].translation.empty()) {
+                bool already = false;
+                for (size_t j = 0; j < reordered_arr.size(); ++j) {
+                    if (reordered_arr[j].word == sentence_arr[i].word) {
+                        already = true;
+                        break;
+                    }
+                }
+                if (!already) {
+                    reordered_arr.push_back(sentence_arr[i]);
+                    break;
+                }
             }
         }
     }
-}
-    // 4. Build final output, skipping marked indices
+
+    // Marker-based skip
+    for (size_t i = 0; i < reordered_arr.size(); ++i) {
+        size_t pos = reordered_arr[i].word.find(PREV_MARKER);
+        if (pos != String::npos) {
+            reordered_arr[i].word = reordered_arr[i].word.substr(0, pos);
+            if (i > 0) skip_indices.push_back(i - 1);
+        }
+    }
+
+    // trigger_word-based skip
+    for (size_t i = 0; i < reordered_arr.size(); ++i) {
+        if (!reordered_arr[i].trigger_word.empty()) {
+            for (size_t j = 0; j < reordered_arr.size(); ++j) {
+                if (reordered_arr[j].word == reordered_arr[i].trigger_word) {
+                    skip_indices.push_back(j);
+                    break;
+                }
+            }
+        }
+    }
+
     Vector<Word> final_arr;
+    
+    // FIRST: apply all skips to get the final word array
     for (size_t i = 0; i < reordered_arr.size(); ++i) {
         bool should_skip = false;
         for (int idx : skip_indices) {
-            if (idx == i) { should_skip = true; break; }
+            if (idx == (int)i) { should_skip = true; break; }
         }
         if (!should_skip) final_arr.push_back(reordered_arr[i]);
     }
+
+    // THEN: apply morph rules on the final filtered array
+    final_arr = applyMorphRules(final_arr);
+
+    
     return final_arr;
 }
-
 static Word default_verb_lookup(const String& word, const Vector<String> sentence, int word_index) {
   
     static bool sanitized = false;
@@ -4029,28 +4591,30 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
         sanitized = true;
     }
     
-    String marked_word = word; 
+    String marked_word = word;
+    bool prev_word_matched = false;
+    String prev_word_trigger = "";
+    int prev_word_morphology = -1;
+    
     if (word_index < 0 || word_index >= (int)sentence.size()) {
         return Word{word, word, -1, 0, 0};
     }
 
     if (verbs_length == 0) {
-    
         return Word{word, word, -1, 0, 0};
     }
 
     bool multibyte = default_multibyte;
 
-    // First, check for exact matches in verb dictionary
-     Verb v = find_verb_in_array(default_verbs, verbs_length, word.c_str());
+    Verb v = find_verb_in_array(default_verbs, verbs_length, word.c_str());
     if (v.t && *v.t) {
         uint64_t verb_flags = v.flags;
-           return Word{word, normalize(v.t), VERB, 0, verb_flags};
+        uint64_t flags = verb_flags;
+        return Word{word, normalize(v.t), VERB, 0, flags};
     }
  
-    // MORPHOLOGY DETECTION
     if (!default_morph_from.variations.empty()) {
-         const Morph* morph_from_ptr = &(default_morph_from);
+        const Morph* morph_from_ptr = &(default_morph_from);
         const Morph* morph_to_ptr = &(default_morph_to);
         String current_word = word;
         Vector<const MorphVariation*> applied_morphs;
@@ -4060,10 +4624,17 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
         int safety = 10;
         
         while (!found_root && safety-- > 0) {
-             MorphResult p = detect_morph(current_word, morph_from_ptr, sentence, word_index);
+            MorphResult p = detect_morph(current_word, morph_from_ptr, sentence, word_index);
             
             if (p.matched_variation != nullptr) {
-              
+                if (p.matched_variation->type == PREV_WORD) {
+                    prev_word_matched = true;
+                    prev_word_morphology = p.matched_variation->morphology;
+                    if (word_index > 0 && word_index < (int)sentence.size()) {
+                        prev_word_trigger = sentence[word_index - 1];
+                    }
+                }
+                
                 marked_word = p.root;
                 if (p.matched_variation->stackable == STACKABLE) {
                     applied_morphs.push_back(p.matched_variation);
@@ -4083,7 +4654,7 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
                         result = v.t;
                         flags = v.flags;
                         found_root = true;
-                           } 
+                    } 
                     break;
                 }
             } else {
@@ -4093,14 +4664,27 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
         
         if (found_root && !applied_morphs.empty()) {
             String translation = result;
+            const Morph* morph_to_ptr = &(default_morph_to);
             for (auto it = applied_morphs.rbegin(); it != applied_morphs.rend(); ++it) {
-                   translation = apply_morph(translation, *it, morph_to_ptr, flags);
-                 }
-             return Word{marked_word, normalize(translation), VERB, 0, flags};
-        } else if (found_root && applied_morphs.empty()) {
-           } else {
-             }
-    } 
+                translation = apply_morph(translation, *it, morph_to_ptr, flags);
+                for (const auto& target_var : morph_to_ptr->variations) {
+                    if (target_var.morphology == (*it)->morphology) {
+                        flags |= target_var.required_flags;
+                        break;
+                    }
+                }
+            }
+            Word result_word;
+            result_word.word = marked_word;
+            result_word.translation = normalize(translation);
+            result_word.type = VERB;
+            result_word.flags = flags;
+            if (prev_word_matched && !prev_word_trigger.empty()) {
+                result_word.trigger_word = prev_word_trigger;
+            }
+            return result_word;
+        }
+    }
 
     // Try suffix-stripping using verb endings
     if (!default_endings.empty() && !default_conjugations.empty()) {
@@ -4112,7 +4696,6 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
                 int ending_form = group.form;
                 int ending_type = group.type;
                 
-                   
                 if (ending_type == TRANSFIX) {
                     if (default_verbs == nullptr || verbs_length == 0) {
                         continue;
@@ -4163,6 +4746,7 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
                             Verb v = find_verb_in_array(default_verbs, verbs_length, dict_pattern.c_str());
                             if (v.t && *v.t) {
                                 String translation = v.t;
+                                uint64_t verb_flags = v.flags;
                                 const Morph* morph_to_ptr = &(default_morph_to);
                                 MorphVariation temp_var;
                                 temp_var.type = ending_type;
@@ -4174,8 +4758,14 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
                                 temp_var.stackable = STACKABLE;
                                 temp_var.vowel_harmony = nullptr;
                                 temp_var.agreement = 0;
-                                translation = apply_morph(translation, &temp_var, morph_to_ptr, v.flags);
-                                 return Word{word, normalize(translation), VERB, 0, v.flags};
+                                translation = apply_morph(translation, &temp_var, morph_to_ptr, verb_flags);
+                                for (const auto& target_var : morph_to_ptr->variations) {
+                                    if (target_var.morphology == temp_var.morphology) {
+                                        verb_flags |= target_var.required_flags;
+                                        break;
+                                    }
+                                }
+                                return Word{word, normalize(translation), VERB, 0, verb_flags};
                             }
                         }
                     }
@@ -4183,7 +4773,7 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
                 }
                 
                 if (word.size() <= ending.size()) {
-                      continue;
+                    continue;
                 }
                 
                 bool ends_with = false;
@@ -4246,20 +4836,43 @@ static Word default_verb_lookup(const String& word, const Vector<String> sentenc
                             }
                             translation = stem;
                             conjugation_applied = true;
-                              break;
+                            break;
                         }
                     }
 
                     if (conjugation_applied) {
-                         return Word{marked_word, normalize(result), VERB, 0, verb_flags};
-                    } 
+                        Word result_word;
+                        result_word.word = marked_word;
+                        result_word.translation = normalize(result);
+                        result_word.type = VERB;
+                        result_word.flags = verb_flags;
+                        if (prev_word_matched && !prev_word_trigger.empty()) {
+                            result_word.trigger_word = prev_word_trigger;
+                            // Add required_flags from PREV_WORD target morphology
+                            const Morph* morph_from_ptr = &(default_morph_from);
+                            const Morph* morph_to_ptr = &(default_morph_to);
+                            for (const auto& var : morph_from_ptr->variations) {
+                                if (var.type == PREV_WORD && var.morphology == prev_word_morphology) {
+                                    for (const auto& target_var : morph_to_ptr->variations) {
+                                        if (target_var.morphology == var.morphology) {
+                                            result_word.flags |= target_var.required_flags;
+                                            break;
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        return result_word;
+                    }
                 }
             }
         }
     } 
-   return Word{marked_word, word, -1, 0, 0};
+    return Word{word, word, -1, 0, 0};
 }
 static Word default_nounLookup(const String& word, const Vector<String> sentence, int word_index) {
+
     struct LookupConfig {
         const Entry* dict;
         unsigned int length;
@@ -4268,15 +4881,85 @@ static Word default_nounLookup(const String& word, const Vector<String> sentence
     const LookupConfig configs[] = {
         {default_nouns, nouns_length, NOUN}
     };
-    
-    
     if (word_index < 0 || word_index >= (int)sentence.size()) {
         return Word{word, word, -1, 0, 0};
     }
 
+ /* PREV_WORD DETECTION (only for nouns, AFTER stacking) */
+{
+    bool is_verb = false;
+
+    bool is_noun = false;
+    for (const auto& cfg : configs) {
+        if (lookup_test(cfg.dict, cfg.length, word.c_str())) {
+            is_noun = true;
+            break;
+        }
+    }
+
+    if (!is_noun) {
+        Verb v = find_verb_in_array(default_verbs, verbs_length, word.c_str());
+        if (v.t && *v.t) {
+            is_verb = true;
+        }
+        
+        if (!is_verb && verbs_length > 0 && !default_endings.empty()) {
+            for (const auto& group : default_endings) {
+                for (const auto& ending : group.endings) {
+                    if (word.size() > ending.size() && 
+                        word.compare(word.size() - ending.size(), ending.size(), ending) == 0) {
+                        String root = word.substr(0, word.size() - ending.size());
+                        Verb v2 = find_verb_in_array(default_verbs, verbs_length, root.c_str());
+                        if (v2.t && *v2.t) {
+                            is_verb = true;
+                            break;
+                        }
+                    }
+                }
+                if (is_verb) break;
+            }
+        }
+    }
+    
+    if (!is_verb) {
+        const Morph* morph_from_ptr = &(default_morph_from);
+        for (const auto& var : morph_from_ptr->variations) {
+            if (var.type == PREV_WORD) {
+                if (word_index > 0 && word_index < (int)sentence.size() && 
+                    sentence[word_index - 1] == var.ending) {
+                    const char* trans = lookup_test(default_nouns, nouns_length, word.c_str());
+                    if (trans) {
+                        String translation = trans;
+                        uint64_t word_flags = lookupFlags_test(default_nouns, nouns_length, word.c_str());
+                        const Morph* morph_to_ptr = &(default_morph_to);
+for (const auto& target_var : morph_to_ptr->variations) {
+    if (target_var.morphology == var.morphology) {
+        
+        translation = apply_morph(translation, &target_var, morph_to_ptr, word_flags);
+        word_flags |= target_var.required_flags;
+        break;
+    }
+    
+}
+
+                        Word result_word;
+                        result_word.word = word + PREV_MARKER;
+                        result_word.trigger_word = sentence[word_index - 1];
+                        result_word.translation = normalize(translation);
+                        result_word.type = NOUN;
+                        result_word.flags = word_flags;
+                        return result_word;
+                    }
+                }
+
+                
+            }
+        }
+    }
+}
+
     /* REGULAR MORPHOLOGICAL DETECTION (stackable suffixes) */
     {
-        
         const Morph* morph_from_ptr = &(default_morph_from);
         String current_word = word;
         Vector<const MorphVariation*> applied_morphs;
@@ -4287,8 +4970,6 @@ static Word default_nounLookup(const String& word, const Vector<String> sentence
         int safety = 30;
 
         while (!found_root && safety-- > 0) {
-              
-            // FIRST: try non-stackable suffixes (es, etc.)
             bool non_stackable_matched = false;
             for (const auto& var : morph_from_ptr->variations) {
                 if (var.type != SUFFIX || var.stackable) continue;
@@ -4300,7 +4981,6 @@ static Word default_nounLookup(const String& word, const Vector<String> sentence
                 String base = current_word.substr(0, current_word.size() - ending.size());
                 String root = base + trigger;
 
-              
                 bool root_exists = false;
                 for (const auto& cfg : configs) {
                     if (lookup_test(cfg.dict, cfg.length, root.c_str())) {
@@ -4309,13 +4989,11 @@ static Word default_nounLookup(const String& word, const Vector<String> sentence
                     }
                 }
 
-              if (root_exists) {
-    applied_morphs.push_back(&var);
-    current_word = root;
-    found_root = true;
-    non_stackable_matched = true;
-    
-                    // Look up translation for non-stackable root
+                if (root_exists) {
+                    applied_morphs.push_back(&var);
+                    current_word = root;
+                    found_root = true;
+                    non_stackable_matched = true;
                     for (const auto& cfg : configs) {
                         const char* lookup_result = lookup_test(cfg.dict, cfg.length, root.c_str());
                         if (lookup_result) {
@@ -4330,7 +5008,6 @@ static Word default_nounLookup(const String& word, const Vector<String> sentence
             }
             if (non_stackable_matched) break;
 
-            // THEN: collect ALL stackable suffixes that match the current word
             Vector<const MorphVariation*> matching_morphs;
             for (const auto& var : morph_from_ptr->variations) {
                 if (var.type != SUFFIX || !var.stackable) continue;
@@ -4341,13 +5018,11 @@ static Word default_nounLookup(const String& word, const Vector<String> sentence
                 matching_morphs.push_back(&var);
             }
 
-        
-
             bool stripped = false;
             for (const auto& var : matching_morphs) {
                 String base = current_word.substr(0, current_word.size() - var->ending.size());
                 String root = base + var->form;
-       
+
                 bool root_exists = false;
                 for (const auto& cfg : configs) {
                     if (lookup_test(cfg.dict, cfg.length, root.c_str())) {
@@ -4355,24 +5030,26 @@ static Word default_nounLookup(const String& word, const Vector<String> sentence
                         break;
                     }
                 }
-                
+
                 if (root_exists) {
                     applied_morphs.push_back(var);
                     current_word = root;
                     stripped = true;
-                    found_root = true; 
-                       for (const auto& cfg : configs) {
-                            const char* lookup_result = lookup_test(cfg.dict, cfg.length, root.c_str());
-                            if (lookup_result) {
-                                result = lookup_result;
-                                flags = lookupFlags_test(cfg.dict, cfg.length, root.c_str());
-                                found_type = cfg.type;
-                                break;
-                            }
+                    found_root = true;
+                    for (const auto& cfg : configs) {
+                        const char* lookup_result = lookup_test(cfg.dict, cfg.length, root.c_str());
+                        if (lookup_result) {
+                            result = lookup_result;
+                            flags = lookupFlags_test(cfg.dict, cfg.length, root.c_str());
+                            found_type = cfg.type;
+                            break;
                         }
+                    }
                     break;
                 }
             }
+
+            if (found_root) break;
 
             if (!stripped && !matching_morphs.empty()) {
                 const auto& var = matching_morphs[0];
@@ -4384,7 +5061,7 @@ static Word default_nounLookup(const String& word, const Vector<String> sentence
             }
 
             if (!stripped) {
-                 for (const auto& cfg : configs) {
+                for (const auto& cfg : configs) {
                     const char* lookup_result = lookup_test(cfg.dict, cfg.length, current_word.c_str());
                     if (lookup_result) {
                         result = lookup_result;
@@ -4398,75 +5075,26 @@ static Word default_nounLookup(const String& word, const Vector<String> sentence
             }
         }
 
-        if (found_root && !applied_morphs.empty()) {
-            
-            String translation = result ? String(result) : current_word;
-            const Morph* morph_to_ptr = &(default_morph_to);
-            for (auto it = applied_morphs.rbegin(); it != applied_morphs.rend(); ++it) {
-                translation = apply_morph(translation, *it, morph_to_ptr, flags);
-                 }
-            
-            Word result_word;
-            result_word.word = word;
-            result_word.translation = normalize(translation);
-            result_word.type = found_type;
-            result_word.flags = flags;
-            return result_word;
-        } 
-    }
-
-    /* PREV_WORD DETECTION (only for nouns, AFTER stacking) */
-    {
-         
-        bool is_verb = false;
-        Verb v = find_verb_in_array(default_verbs, verbs_length, word.c_str());
-        if (v.t && *v.t) {
-            is_verb = true;
-            }
-        
-        if (!is_verb && verbs_length > 0 && !default_endings.empty()) {
-            for (const auto& group : default_endings) {
-                for (const auto& ending : group.endings) {
-                    if (word.size() > ending.size() && 
-                        word.compare(word.size() - ending.size(), ending.size(), ending) == 0) {
-                        is_verb = true;
-                        break;
-                    }
-                }
-                if (is_verb) break;
-            }
-        }
-        
-        if (!is_verb) {
-            const Morph* morph_from_ptr = &(default_morph_from);
-            for (const auto& var : morph_from_ptr->variations) {
-                if (var.type == PREV_WORD) {
-                    if (word_index > 0 && word_index < (int)sentence.size() && 
-                        sentence[word_index - 1] == var.ending) {
-                        const char* trans = lookup_test(default_nouns, nouns_length, word.c_str());
-                        if (trans) {
-                            String translation = trans;
-                            uint64_t word_flags = lookupFlags_test(default_nouns, nouns_length, word.c_str());
-                            const Morph* morph_to_ptr = &(default_morph_to);
-                            for (const auto& target_var : morph_to_ptr->variations) {
-                                if (target_var.morphology == var.morphology) {
-                                    translation = apply_morph(translation, &target_var, morph_to_ptr, word_flags);
-                                    break;
-                                }
+                    if (found_root && !applied_morphs.empty()) {
+                    String translation = result ? String(result) : current_word;
+                    const Morph* morph_to_ptr = &(default_morph_to);
+                    for (auto it = applied_morphs.rbegin(); it != applied_morphs.rend(); ++it) {
+                        translation = apply_morph(translation, *it, morph_to_ptr, flags);
+                        for (const auto& target_var : morph_to_ptr->variations) {
+                            if (target_var.morphology == (*it)->morphology) {
+                                flags |= target_var.required_flags;
+                                break;
                             }
-                            Word result_word;
-                            result_word.word = word + PREV_MARKER;
-                            result_word.trigger_word = sentence[word_index - 1];
-                            result_word.translation = normalize(translation);
-                            result_word.type = NOUN;
-                            result_word.flags = word_flags;
-                                  
-                            return result_word;
                         }
                     }
+                    Word result_word;
+                    result_word.word = word;
+                    result_word.translation = normalize(translation);
+                    result_word.type = found_type;
+                    result_word.flags = flags;
+                  
+                    return result_word;
                 }
-            }
-        }
     }
 
     // Normal noun lookup
@@ -4481,9 +5109,7 @@ static Word default_nounLookup(const String& word, const Vector<String> sentence
 
     // Verb fallback
     Word vw = default_verb_lookup(word, sentence, word_index);
-    if (vw.type != -1) {
-        return vw;
-    }
+    if (vw.type != -1) return vw;
 
     // TRANSFIX detection
     {
@@ -4536,15 +5162,14 @@ static Word default_nounLookup(const String& word, const Vector<String> sentence
         }
     }
 
-
     return Word{ word, normalize(word), -1 };
 }
 
-// mapping out how i'm gonna receive the binary file buffers to dinamically define the rules 
-// it works!!
+
 inline String load(const uint8_t* file, size_t size)
 {
     const uint8_t* ptr = reinterpret_cast<const uint8_t*>(file);
+    const uint8_t* start = ptr;
     const uint8_t* end = ptr + size;
     int current_area = 0;
     const char* s = nullptr;
@@ -4593,8 +5218,7 @@ inline String load(const uint8_t* file, size_t size)
     while (ptr < end)
     {
           uint8_t marker = *ptr++;
-  
-
+        
         switch (marker)
         {
             // metadata
@@ -4622,12 +5246,12 @@ inline String load(const uint8_t* file, size_t size)
             current_area = 5;
             break;
 // morphology (THE MOST IMPORTANT OF THEM ALLLLLL)
-        case 0xD6:
-            current_area = 6;
-            break;
-        case 0xD7:
-            current_area = 7;
-            break;
+     case 0xD6:
+    current_area = 6;
+    break;
+case 0xD7:
+    current_area = 7;
+    break;
 
 case 0xF0:
 {
@@ -4692,7 +5316,7 @@ case 0xF0:
     uint8_t req_count = read_byte(ptr);
     uint64_t required_flags = 0;
     for (uint8_t i = 0; i < req_count; i++) {
-        required_flags |= read_byte(ptr);
+        required_flags |= read_u64(ptr);
     }
 
     uint8_t stackable_byte = read_byte(ptr);
@@ -4715,7 +5339,6 @@ case 0xF0:
     uint8_t agreement = read_byte(ptr);
     uint8_t harmony = read_byte(ptr);  
 
-    
     // Create and push immediately, since both source and target are the same structures
     MorphVariation var;
     var.flag = result_flags;
@@ -4729,7 +5352,7 @@ case 0xF0:
     var.stackable = stackable_byte;
     var.vowel_harmony = nullptr;
     var.agreement = agreement;
-    
+ 
     if (current_area == 6) {
         default_morph_from.variations.push_back(var);
     } else {
@@ -4837,22 +5460,26 @@ case 0xF2:
     }
     else if (current_area == 1)
     {
-        //read the word flags
-        uint64_t flag_count = *ptr++;
+        // Read flag count (2 bytes)
+        uint16_t flag_count = 0;
+        flag_count |= *ptr++;
         flag_count |= (*ptr++) << 8;
         
         target_flags = 0;
         
-    for (int i = 0; i < flag_count; i++) {
-    uint8_t low_byte = *ptr++;
-    uint8_t high_byte = *ptr++;
-    uint64_t flag_value = low_byte | (high_byte << 8);
-    target_flags |= flag_value;
-}
+        // Read each flag (2 bytes each)
+        for (uint16_t i = 0; i < flag_count; i++) {
+            uint16_t flag_value = 0;
+            flag_value |= *ptr++;
+            flag_value |= (*ptr++) << 8;
+            target_flags |= flag_value;
+        }
+        
+        // Now process the dictionary entry
         switch (ngram_size)
         {
                case 0x01:
-                    if(type == 0x03) {  // VERB - goes to separate verbs array
+                    if(type == 0x03) {  // VERB goes to separate verbs array
                         Verb e = {s, r, 0, target_flags};
                         new (&default_verbs[verbs_length]) Verb();
                         default_verbs[verbs_length++] = e;

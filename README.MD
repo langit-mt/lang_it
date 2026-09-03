@@ -10,11 +10,12 @@ lang_it is a rule-based, portable and lightweight universal translation engine w
 - Homonym disambiguation
 - Simple auto-correct
 - Multi-script languages (Latin, Hanzi, Kanji and Kana, Arabic-based, Cyrilic, Hangul)
+- IPA transcription table rules
 
 ## Technical Info
 
-- ~59kb compiled footprint.
-- C++ STL only, no external dependencies, runs anywhere as long as there's std::vector and std::string support.
+- ~120kb compiled footprint.
+- C++ STL/ETL only, no external dependencies, runs anywhere as long as there's std::vector and std::string support.
 - Can be compiled with g++, Clang or MSVC.
 - Validated JS (WASM), Ruby (Rice), Python (pybind11) and Java (JNI) bindings. 
 
@@ -24,8 +25,8 @@ In the age of ML based translation, why care about deterministic rule-based tran
 For me personally i see the values in two aspects:
 
 - Endangered languages with little validated corpora available for ML model training, but reasonable research on the grammar and vocabulary can be found.
-- Linguistics analysis: lang_it can also produce tagged translations that can be used to generate statistics and reports on the language is translation into by seeing how does sentence in language A turns into sentence in language B.
-- Portability: lang_it is super small compared to modern translation tools, and with enough module tuning, you can get very accurate translations, even with MCUs. You ever wanted your fridge to translate offline? now it can!
+- Linguistics analysis: lang_it can also produce tagged translations that can be used to generate statistics and reports on the language it is translating into by seeing how does sentence in language A turns into sentence in language B.
+- Portability: lang_it is super small compared to modern translation tools, and with enough module tuning, you can get very accurate translations, even with MCUs. You ever wanted your fridge to translate a book? now it can!
 
 ## How?
 
@@ -127,15 +128,18 @@ Module.translate_from_bin("air, chendawan", fileBuffer); // in the wasm bindings
 | FEATURE                          |  STATUS    |  TESTED WITH                                                             |  
 | -------------                    |  ------    | ---------------------------------------------------------------------    | 
 | Word Lookup                      |   ✅       | English, Portuguese, Japanese, Spanish, French, Chinese, Malay, others.|  
+| Agreement Propagation            |   🆗       |  Portuguese                                                            |
+| Asymmetrical S-O-V Alignments    |   🆗       |  Maxakalí, Tagalog                                                     |
 | Auto Correct                     |   ⚠️       | Portuguese, English                                                    |    
 | Gender Inflection                |   ✅       | Portuguese, Russian, Spanish                                           |    
 | Multi Script                     |   🆗       | Japanese (Kana/Kanji/Romaji), Chinese (Hanzi/pīnyīn), Malay(Rumi, Jawi)|  
-| Grammatical Case                 |   ⚠️       |   Portuguese, Russian                                                  |   
+| Grammatical Case                 |   ⚠️       |   Portuguese, Russian, Maxakalí                                        |   
 | Infixes                          |   ✅       | Tagalog                                                                |
 | Non-concatenative transfixes     |   🆗       | Maltese                                                                |
 | Reduplication                    |   🆗       | Marshallese, Pingelapese, Malay, Kham                                  |
 | Lexical Affixing / Polysynthesis |   ❌       |  Greenlandic, Yupik                                                    |
 | Agreement Propagation            |   🆗       |  Portuguese                                                            |
+| IPA Transcription                |   🆗       |  Maxakalí, English                                                     |
 
 
 -----
