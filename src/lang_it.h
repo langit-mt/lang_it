@@ -3337,9 +3337,7 @@ void parsePatternToken(const String& token, PatternToken& result) {
 inline bool endsWithVowel(const String& word) {
     if (word.empty()) return false;
     char last = tolower(word[word.length() - 1]);
-    return last == 'a' || last == 'e' || last == 'i' || last == 'o' || last == 'u' ||
-           last == 'á' || last == 'é' || last == 'í' || last == 'ó' || last == 'ú' ||
-           last == 'ã' || last == 'õ' || last == 'â' || last == 'ê' || last == 'ô';
+    return isVowel(last);
 }
 
 inline bool endsWithConsonant(const String& word) {
@@ -3350,9 +3348,7 @@ inline bool endsWithConsonant(const String& word) {
 inline bool startsWithVowel(const String& word) {
     if (word.empty()) return false;
     char first = tolower(word[0]);
-    return first == 'a' || first == 'e' || first == 'i' || first == 'o' || first == 'u' ||
-           first == 'á' || first == 'é' || first == 'í' || first == 'ó' || first == 'ú' ||
-           first == 'ã' || first == 'õ' || first == 'â' || first == 'ê' || first == 'ô';
+    return isVowel(first);
 }
 
 inline bool startsWithConsonant(const String& word) {
@@ -3363,9 +3359,7 @@ inline bool startsWithConsonant(const String& word) {
 inline bool containsVowel(const String& word) {
     for (char c : word) {
         char lower = tolower(c);
-        if (lower == 'a' || lower == 'e' || lower == 'i' || lower == 'o' || lower == 'u' ||
-            lower == 'á' || lower == 'é' || lower == 'í' || lower == 'ó' || lower == 'ú' ||
-            lower == 'ã' || lower == 'õ' || lower == 'â' || lower == 'ê' || lower == 'ô') {
+        if (isVowel(lower)) {
             return true;
         }
     }
@@ -3376,9 +3370,7 @@ inline bool containsConsonant(const String& word) {
     for (char c : word) {
         if (isalpha(c)) {
             char lower = tolower(c);
-            if (!(lower == 'a' || lower == 'e' || lower == 'i' || lower == 'o' || lower == 'u' ||
-                  lower == 'á' || lower == 'é' || lower == 'í' || lower == 'ó' || lower == 'ú' ||
-                  lower == 'ã' || lower == 'õ' || lower == 'â' || lower == 'ê' || lower == 'ô')) {
+            if (!isVowel(lower)) {
                 return true;
             }
         }
