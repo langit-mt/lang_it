@@ -315,8 +315,8 @@ typedef struct {
    int gc_from_count;                
    int gc_to_count;  
    
-   AdjectiveOrder ao_from;
-   AdjectiveOrder ao_to;
+   int ao_from;
+   int ao_to;
 
    
    Definiteness def_from[10]; 
@@ -775,7 +775,7 @@ typedef struct
 
 struct CaseVariation {
     uint8_t flag;
-    uint8_t gender;
+    uint64_t gender;
     String ending;
     String form;
     HarmonyTable* v_h;
@@ -1943,16 +1943,24 @@ String name(const char* sentence) { \
             if (i > 0) { \
                 auto &previous = reordered_arr.at(i - 1); \
                 if (previous.trigger_word.empty() && \
+                /* Applying either the NOMINATIVE or the ERGATIVE, whenever there's a subject and verb*/\
+                /* in the canonical order: SOV || OVS (O preceding V) */\
+                ((INFO_ARG)->clause_order_to == SOV || (INFO_ARG)->clause_order_to == OVS) &&\
                     current.type == VERB && (previous.type == NOUN || previous.type == PRONOUN)) { \
                     uint64_t f = lookupFlags_test(default_nouns, nouns_length, previous.word.c_str()); \
                     CaseResult g = detect_case(current.word, FROM_CASE); \
                     previous.translation = apply_case(previous.translation, nullptr, TO_CASE, f, NOMINATIVE); \
+                    previous.translation = apply_case(previous.translation, nullptr, TO_CASE, f, ERGATIVE); \
                 } \
             } \
-            if (current.type == VERB && (next.type == NOUN || next.type == PRONOUN)) { \
+             /* Applying either the ACCUSATIVE or the ABSOLUTIVE, whenever you find an object and verb*/\
+                /* in the canonical order: SVO || VOS (V preceding O) */\
+            if (((INFO_ARG)->clause_order_to == SVO || (INFO_ARG)->clause_order_to == VOS) &&\
+              current.type == VERB && (next.type == NOUN || next.type == PRONOUN)) { \
                 uint64_t f = lookupFlags_test(default_nouns, nouns_length, next.word.c_str()); \
                 CaseResult g = detect_case(current.word, FROM_CASE); \
                 next.translation = apply_case(next.translation, nullptr, TO_CASE, f, ACCUSATIVE); \
+                next.translation = apply_case(next.translation, nullptr, TO_CASE, f, ABSOLUTIVE); \
             } \
         } \
         if ((INFO_ARG)->clause_order_to == SOV) { \
@@ -2024,8 +2032,8 @@ String name(const char* sentence) { \
         } \
    if ((ARR).size() >= 2) { \
             Vector<Word> replacement; \
-            AdjectiveOrder ao_from = (INFO_ARG)->ao_from;   \
-            AdjectiveOrder ao_to = (INFO_ARG)->ao_to;       \
+            int ao_from = (INFO_ARG)->ao_from;   \
+            int ao_to = (INFO_ARG)->ao_to;       \
             for (size_t i = 0; i + 1 < (ARR).size(); ++i) { \
                 if(ao_from != ao_to && (((ARR)[i].type == NOUN && (ARR)[i + 1].type == ADJECTIVE) || ((ARR)[i].type == ADJECTIVE && (ARR)[i + 1].type == NOUN))){ \
                   Word temp_word_i = (ARR)[i];\
@@ -2177,7 +2185,9 @@ enum ClauseOrders {
     SVO = 0,
     SOV = 1,
     VSO = 2,
-    VOS = 3
+    VOS = 3,
+    OSV = 4,
+    OVS = 5
 };
 
 
@@ -2333,15 +2343,17 @@ enum VerbFlags : uint64_t {
 #define NEUTRAL_GENDER (FEMININE_GENDER | MASCULINE_GENDER) // haha
 #define THIRD_PERSON (FIRST_PERSON | SECOND_PERSON) // haha2
 
-enum GrammaticalCase : uint8_t {
+enum GrammaticalCase : uint16_t {
     NOMINATIVE      = 1 << 0,
     ACCUSATIVE      = 1 << 1,
-    GENITIVE        = 1 << 2,
-    DATIVE          = 1 << 3,
-    INSTRUMENTAL    = 1 << 4,
-    PREPOSITIONAL   = 1 << 5, 
-    VOCATIVE        = 1 << 6,
-    ABLATIVE        = 1 << 7
+    ERGATIVE        = 1 << 2,
+    ABSOLUTIVE      = 1 << 3,
+    GENITIVE        = 1 << 4,
+    DATIVE          = 1 << 5,
+    INSTRUMENTAL    = 1 << 6,
+    PREPOSITIONAL   = 1 << 7, 
+    VOCATIVE        = 1 << 8,
+    ABLATIVE        = 1 << 9
 };
 
 enum SuffixFlags: uint8_t {
@@ -4345,8 +4357,8 @@ inline unsigned int ngrams_length = 0;
 static inline Entry default_fixed_ngrams[5];
 
 Info default_info = {
-    SVO,
-    SOV, 
+    0,
+    0, 
       // genitive
     { 
         { MIDDLE_WORD, 2, POSSESSED_FIRST, INDEFINITE, "do" },
@@ -4357,8 +4369,8 @@ Info default_info = {
     },
     1,                
     1,                
-    NOUN_FIRST,        
-    NOUN_FIRST,
+    0,        
+    0,
     // definiteness
     { 
         
@@ -4412,7 +4424,9 @@ inline Morph default_morph_to;
 
 CASE_DEF(cases,
 {
-    {NOMINATIVE, 0, "", " te", nullptr, SUFFIX}
+    {ERGATIVE, 0, "", " te", nullptr, SUFFIX},
+    {ABSOLUTIVE, STATIVE_VERB, "", "ũ", nullptr, PREFIX},
+    {ABSOLUTIVE, 0, "", " te", nullptr, SUFFIX},
 });
 
 HOMONYM_DEF(
@@ -5244,7 +5258,12 @@ inline String load(const uint8_t* file, size_t size)
 case 0xD7:
     current_area = 7;
     break;
-
+case 0xD8:
+    current_area = 8;
+    break;
+    case 0xD9:
+    current_area = 9;
+    break;
 case 0xF0:
 {
     if (current_area == 0) // metadata
@@ -5350,6 +5369,15 @@ case 0xF0:
     } else {
         default_morph_to.variations.push_back(var);
     }
+}else if(current_area == 8){
+    // read the canonical order (SOV, VOS, OVS, Whatever) byte FROM
+    uint8_t canonical_order = read_byte(ptr);
+    default_info.clause_order_from = canonical_order;
+}else if(current_area == 9){
+    
+    // read the canonical order (SOV, VOS, OVS, WHatever) byte TO 
+    uint8_t canonical_order = read_byte(ptr);
+    default_info.clause_order_to = canonical_order;
 }
     break;
 }
@@ -5383,6 +5411,15 @@ case 0xF1:
         r = reinterpret_cast<const char*>(ptr);
         ptr += replacement_length + 1;
     }
+    else if(current_area == 8){
+    // read the modifier order (0 = noun first, 1 = modifier first) byte FROM
+    int modifier_order = read_byte(ptr);
+    default_info.ao_from = modifier_order;
+}else if(current_area == 9){
+    // read the modifier order (0 = noun first, 1 = modifier first) byte TO
+    int modifier_order = read_byte(ptr);
+    default_info.ao_to = modifier_order;
+}
     break;
 }
 
@@ -5542,7 +5579,10 @@ printf("  Morphology: %zu source, %zu target\n",
        default_morph_from.variations.size(), default_morph_to.variations.size());
 printf("  Normalization rules: %d\n", normalizationRuleLength);
 printf("  Multibyte: %s\n", (default_multibyte == 0 ? "No" : "Yes"));
-
+printf("  Canonical Clause Order: %s -> %s\n", 
+    (default_info.clause_order_from == 0 ? "SVO" : default_info.clause_order_from == 1 ? "SOV" : ""), 
+     (default_info.clause_order_to == 0 ? "SVO" : default_info.clause_order_to == 1 ? "SOV" : "" ));
+printf("  Modifier Order: %s -> %s\n", default_info.ao_from == 0 ? "Initial" : "Final", default_info.ao_to == 0 ? "Initial" : "Final");
 
 return String("Loaded translator: " + from + " > " + to + "\n");
 }
